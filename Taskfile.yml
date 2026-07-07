@@ -1,0 +1,40 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the binary
+    cmds:
+      - go build -o bin/confluence2md-indexer{{exeExt}} ./cmd/confluence2md-indexer
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
+
+  test:coverage:
+    desc: Run tests with coverage profile
+    cmds:
+      - go test -covermode=atomic -coverprofile=coverage.out ./...
+
+  coverage:check:
+    desc: Enforce minimum test coverage percentage
+    cmds:
+      - task test:coverage
+      - go run ./internal/tools/coveragecheck --profile coverage.out
+
+  lint:
+    desc: Run lint checks
+    cmds:
+      - |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "The following files need gofmt:" >&2
+          echo "$unformatted" >&2
+          exit 1
+        fi
+      - go vet ./...
+
+  tidy:
+    desc: Tidy go modules
+    cmds:
+      - go mod tidy

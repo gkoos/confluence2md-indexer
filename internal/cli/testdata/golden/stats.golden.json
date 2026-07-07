@@ -1,0 +1,12 @@
+{
+  "command": "stats",
+  "dbPath": "\u003cdb-path\u003e",
+  "schemaVersion": "1",
+  "stats": {
+    "chunks": 1,
+    "documents": 1,
+    "embeddings": 1,
+    "runs": 1,
+    "schemaVersion": 1
+  }
+}

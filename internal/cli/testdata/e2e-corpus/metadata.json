@@ -1,0 +1,11 @@
+{
+  "pages": {
+    "1001": {
+      "local_path": "page-1001.md",
+      "title": "Golden Apple Page",
+      "space_key": "ENG",
+      "last_modified_at": "2026-02-10T10:00:00Z",
+      "source_url": "https://example.test/pages/1001"
+    }
+  }
+}

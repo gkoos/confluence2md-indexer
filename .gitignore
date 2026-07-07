@@ -1,0 +1,16 @@
+# Binaries
+confluence2md-indexer
+confluence2md-indexer.exe
+
+# Build artifacts
+dist/
+build/
+
+# Test artifacts
+coverage.out
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

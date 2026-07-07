@@ -1,0 +1,32 @@
+{
+  "checkedFiles": 1,
+  "chunkWrites": 1,
+  "command": "index",
+  "dbPath": "\u003cdb-path\u003e",
+  "dbStats": {
+    "chunks": 1,
+    "documents": 1,
+    "embeddings": 1,
+    "runs": 1,
+    "schemaVersion": 1
+  },
+  "documents": {
+    "deleted": 0,
+    "inserted": 1,
+    "skipped": 0,
+    "updated": 0
+  },
+  "embedding": {
+    "provider": "hash-local",
+    "source": "hash-fallback",
+    "written": 1
+  },
+  "incremental": true,
+  "inputFolder": "\u003cinput-folder\u003e",
+  "metadataPath": "\u003cmetadata-path\u003e",
+  "pageCount": 1,
+  "rebuild": false,
+  "runId": "\u003crun-id\u003e",
+  "schemaVersion": "1",
+  "status": "phase4-ready"
+}

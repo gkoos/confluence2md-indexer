@@ -1,0 +1,48 @@
+{
+  "command": "query",
+  "count": 1,
+  "dbPath": "\u003cdb-path\u003e",
+  "pagination": {
+    "limit": 0,
+    "offset": 0
+  },
+  "request": {
+    "Alpha": 0.7,
+    "CandidateK": 50,
+    "Expand": 0,
+    "Filters": {
+      "Candidate": 0,
+      "FromDate": "",
+      "PageID": "",
+      "SpaceKey": "",
+      "ToDate": ""
+    },
+    "Fusion": "weighted",
+    "Limit": 0,
+    "Mode": "hybrid",
+    "Offset": 0,
+    "RRFK": 60,
+    "Text": "apple",
+    "TopK": 10
+  },
+  "results": [
+    {
+      "chunkId": "1001:000000",
+      "chunkIndex": 0,
+      "chunkText": "# Golden Apple Page\n\nThis page contains apple and banana examples for deterministic hybrid retrieval tests.",
+      "documentId": "1001",
+      "fusedScore": 1,
+      "fusion": "weighted",
+      "lexicalScore": 1,
+      "localPath": "page-1001.md",
+      "pageId": "1001",
+      "rank": 1,
+      "sourceUrl": "https://example.test/pages/1001",
+      "spaceKey": "ENG",
+      "title": "Golden Apple Page",
+      "vectorScore": 1
+    }
+  ],
+  "schemaVersion": "1",
+  "total": "\u003ctotal\u003e"
+}
