@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2](https://github.com/gkoos/confluence2md-indexer/compare/v0.1.1...v0.1.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **release:** track cli entrypoint and narrow binary ignore rules ([#2](https://github.com/gkoos/confluence2md-indexer/issues/2)) ([b2bfa2c](https://github.com/gkoos/confluence2md-indexer/commit/b2bfa2c10c8b9db5520343cc70444364e1d96644))
+
 ## [0.1.1](https://github.com/gkoos/confluence2md-indexer/compare/v0.1.0...v0.1.1) (2026-07-07)
 
 
