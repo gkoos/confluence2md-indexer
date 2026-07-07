@@ -1,10 +1,11 @@
 # Binaries
-confluence2md-indexer
-confluence2md-indexer.exe
+/confluence2md-indexer
+/confluence2md-indexer.exe
 
 # Build artifacts
 dist/
 build/
+/bin/
 
 # Test artifacts
 coverage.out
