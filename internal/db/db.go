@@ -635,7 +635,9 @@ ORDER BY chunk_index ASC`, documentID, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("fetch chunk window: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	out := make([]ChunkWindowItem, 0, end-start+1)
 	for rows.Next() {
