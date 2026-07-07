@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	exitCodeOK             = 0
-	exitCodeInvalidUsage   = 2
-	exitCodeNotImplemented = 3
+	exitCodeOK           = 0
+	exitCodeInvalidUsage = 2
 
 	defaultDBFileName = "confluence2md-index.db"
 	outputSchemaV1    = service.OutputSchemaVersion
@@ -390,25 +389,15 @@ func (a *App) runStats(args []string) int {
 	return exitCodeOK
 }
 
-func (a *App) handleImplementationError(command string, err error) int {
-	if errors.Is(err, ErrNotImplemented) {
-		fmt.Fprintf(os.Stderr, "%s: not implemented yet (Phase 0 scaffold complete)\n", command)
-		return exitCodeNotImplemented
-	}
-
-	fmt.Fprintf(os.Stderr, "%s: %v\n", command, err)
-	return exitCodeInvalidUsage
-}
-
 func (a *App) printUsage(out *os.File) {
-	fmt.Fprintln(out, "confluence2md-indexer - index and query confluence2md output")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Usage:")
-	fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--rebuild] [--json]")
-	fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain]")
-	fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--json]")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Indexing defaults to incremental mode; use --rebuild for full rebuild.")
+	_, _ = fmt.Fprintln(out, "confluence2md-indexer - index and query confluence2md output")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Usage:")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--rebuild] [--json]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--json]")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Indexing defaults to incremental mode; use --rebuild for full rebuild.")
 }
 
 func summarizeText(s string, max int) string {
@@ -421,9 +410,10 @@ func summarizeText(s string, max int) string {
 
 func buildExplainSummary(results []query.Result, req query.Request) []string {
 	effectiveFusion := req.Fusion
-	if req.Mode == "lexical" {
+	switch req.Mode {
+	case "lexical":
 		effectiveFusion = "lexical"
-	} else if req.Mode == "vector" {
+	case "vector":
 		effectiveFusion = "vector"
 	}
 

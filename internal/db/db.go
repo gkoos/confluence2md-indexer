@@ -201,7 +201,9 @@ func ensureDocumentColumn(ctx context.Context, database *sql.DB, name string, de
 	if err != nil {
 		return fmt.Errorf("inspect documents schema: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	for rows.Next() {
 		var cid int
@@ -510,7 +512,9 @@ LIMIT ?`, strings.Join(where, " AND "))
 	if err != nil {
 		return nil, fmt.Errorf("lexical query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	out := make([]Candidate, 0, filters.Candidate)
 	for rows.Next() {
@@ -570,7 +574,9 @@ WHERE %s`, strings.Join(where, " AND "))
 	if err != nil {
 		return nil, fmt.Errorf("vector query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	out := make([]Candidate, 0, filters.Candidate)
 	for rows.Next() {

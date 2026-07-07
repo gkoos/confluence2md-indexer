@@ -99,7 +99,9 @@ func (p *OpenAIProvider) Embed(ctx context.Context, texts []string) ([][]float32
 	if err != nil {
 		return nil, fmt.Errorf("openai embeddings request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var payload struct {
 		Data []struct {
