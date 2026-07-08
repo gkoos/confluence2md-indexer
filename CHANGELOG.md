@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.1.2...v0.2.0) (2026-07-08)
+
+
+### Features
+
+* **indexerapi:** add pkg query entrypoint and route service query through it ([#4](https://github.com/gkoos/confluence2md-indexer/issues/4)) ([21ff685](https://github.com/gkoos/confluence2md-indexer/commit/21ff68570c9b63f03a9d8b7291bbef82d527263d))
+
 ## [0.1.2](https://github.com/gkoos/confluence2md-indexer/compare/v0.1.1...v0.1.2) (2026-07-07)
 
 
