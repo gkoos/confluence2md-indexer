@@ -13,7 +13,7 @@ Use it to:
 - search docs offline with deterministic output contracts
 - filter by space, page, and date range
 - run automated retrieval tests with stable JSON output
-- power in-process integrations through service APIs
+- power in-process integrations through a public Query API
 
 What you get:
 
@@ -85,6 +85,29 @@ confluence2md-indexer stats [--db path] [--json]
 ```
 
 See [docs/query-examples.md](docs/query-examples.md) for practical command patterns.
+
+### In-process Query API (for MCP)
+
+You can import and call the Query path directly without spawning the CLI process:
+
+```go
+import (
+	"context"
+
+	"github.com/gkoos/confluence2md-indexer/pkg/indexerapi"
+)
+
+resp, err := indexerapi.Query(context.Background(), "./output/confluence2md-index.db", indexerapi.QueryRequest{
+	Text: "how to rotate secrets",
+	Mode: "hybrid",
+	TopK: 10,
+})
+if err != nil {
+	// handle error
+}
+
+_ = resp.Results
+```
 
 ## How It Works
 

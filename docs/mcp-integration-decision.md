@@ -20,8 +20,9 @@ The CLI remains a stable human/debug and contract-validation interface, but NDJS
 ## What This Means
 
 1. Keep improving core query/index package APIs as the canonical behavior.
-2. Keep CLI JSON output stable (`schemaVersion`) for testing and troubleshooting.
-3. Do not add NDJSON unless MCP integration mode changes to subprocess streaming.
+2. Use `github.com/gkoos/confluence2md-indexer/pkg/indexerapi` as the in-process Query import path for MCP integration.
+3. Keep CLI JSON output stable (`schemaVersion`) for testing and troubleshooting.
+4. Do not add NDJSON unless MCP integration mode changes to subprocess streaming.
 
 ## Alternatives Considered
 
