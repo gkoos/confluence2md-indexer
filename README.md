@@ -7,6 +7,10 @@
 
 Build a local SQLite index from [confluence2md](https://github.com/gkoos/confluence2md) output and run fast lexical, vector, and hybrid retrieval from the command line.
 
+## Part of the `confluence2md` Platform
+
+`confluence2md-indexer` is the second step in a three-tool local Confluence knowledge pipeline. Feed it the output of [`confluence2md`](https://github.com/gkoos/confluence2md), then connect [`confluence2md-mcp`](https://github.com/gkoos/confluence2md-mcp) to query the index from any AI client. See [docs/platform.md](docs/platform.md) for the full architecture.
+
 Use it to:
 
 - run local RAG retrieval against exported Confluence pages
