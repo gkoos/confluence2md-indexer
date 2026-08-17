@@ -84,7 +84,15 @@ confluence2md-indexer stats --db ./output/confluence2md-index.db --json
 
 ```text
 confluence2md-indexer index [folder] [--db path] [--rebuild] [--json]
-confluence2md-indexer query --q text [--db path] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain]
+confluence2md-indexer query --q text
+  [--db path]
+  [--mode hybrid|lexical|vector]
+  [--fusion weighted|rrf] [--alpha 0..1] [--rrf-k N]
+  [--top-k N] [--candidate-k N]
+  [--offset N] [--limit N]
+  [--space key] [--page-id id] [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+  [--expand N]
+  [--json] [--explain]
 confluence2md-indexer stats [--db path] [--json]
 ```
 
@@ -99,18 +107,59 @@ import (
 	"context"
 
 	"github.com/gkoos/confluence2md-indexer/pkg/indexerapi"
+	"github.com/gkoos/confluence2md-indexer/internal/db"
 )
 
 resp, err := indexerapi.Query(context.Background(), "./output/confluence2md-index.db", indexerapi.QueryRequest{
-	Text: "how to rotate secrets",
-	Mode: "hybrid",
-	TopK: 10,
+	Text:       "how to rotate secrets",
+	Mode:       "hybrid",   // hybrid | lexical | vector
+	Fusion:     "weighted", // weighted | rrf
+	Alpha:      0.70,       // lexical weight for weighted fusion (0..1)
+	RRFK:       60,         // rank constant for rrf fusion
+	TopK:       10,         // final result count
+	CandidateK: 50,         // candidates per retrieval channel before fusion
+	Offset:     0,          // zero-based offset into ranked results
+	Limit:      0,          // page size; 0 defaults to TopK
+	Expand:     0,          // adjacent chunks to include around each hit
+	Filters: db.SearchFilters{
+		SpaceKey: "",         // filter by space_key
+		PageID:   "",         // filter by page_id
+		FromDate: "",         // lower bound for last_modified_at (YYYY-MM-DD)
+		ToDate:   "",         // upper bound for last_modified_at (YYYY-MM-DD)
+	},
 })
 if err != nil {
 	// handle error
 }
 
-_ = resp.Results
+_ = resp.Results // []indexerapi.QueryResult
+_ = resp.Total   // total ranked results before pagination
+```
+
+`indexerapi.Query` opens and closes a SQLite connection per call. For occasional use this is fine. If you are issuing many queries in a single session (typical for MCP), open the database once and call `query.Run` directly:
+
+```go
+import (
+	"context"
+
+	"github.com/gkoos/confluence2md-indexer/internal/db"
+	"github.com/gkoos/confluence2md-indexer/internal/embedding"
+	"github.com/gkoos/confluence2md-indexer/internal/query"
+)
+
+database, err := db.Open("./output/confluence2md-index.db")
+if err != nil {
+	// handle error
+}
+defer database.Close()
+
+provider := embedding.NewDefaultFromEnv().Provider
+
+results, total, err := query.Run(ctx, database, provider, query.Request{
+	Text: "how to rotate secrets",
+	Mode: "hybrid",
+	TopK: 10,
+})
 ```
 
 ## How It Works
