@@ -1,6 +1,6 @@
 module github.com/gkoos/confluence2md-indexer
 
-go 1.25.12
+go 1.26.6
 
 require github.com/glebarez/go-sqlite v1.22.0
 
