@@ -50,7 +50,7 @@ Pre-built binaries are available on the [Releases](https://github.com/gkoos/conf
 
 ### Requirements
 
-- Go 1.25+ (for local builds)
+- Go 1.26+ (for local builds)
 - [Task](https://taskfile.dev) (recommended for local workflow)
 - Existing `confluence2md` output folder with `metadata.json`
 
@@ -201,10 +201,21 @@ The indexer reads:
 
 This tool is optimized for local developer workflows, not large multi-tenant serving.
 
+### Embedding Provider Setup
+
+Indexing works with or without an OpenAI API key. The embedding provider is automatically selected based on environment:
+
+- **Hash fallback (default)**: If `OPENAI_API_KEY` is unset or empty, embeddings are generated deterministically using SHA256 hashing at 256 dimensions. No network calls, no cost. Suitable for small internal docs and exact-match searches.
+- **OpenAI embeddings**: If `OPENAI_API_KEY` is set, embeddings use the OpenAI API (default model: `text-embedding-3-small`). Trained embeddings capture semantic meaning, significantly improving vector search quality. Optional: set `OPENAI_EMBED_MODEL` to use a different model (e.g., `text-embedding-3-large` for higher dimensions). Note: API calls incur cost per token.
+
+**When to use each:**
+- Hash fallback: Dev workflows, offline testing, cost-sensitive use, when lexical search (`--mode lexical`) is sufficient.
+- OpenAI embeddings: Production RAG, semantic search importance, hybrid retrieval tuning, large or complex technical corpora.
+
 Current practical limits depend mostly on chunk count and embedding dimension.
 
-- Hash fallback embeddings (`OPENAI_API_KEY` unset) use 256 dimensions.
-- OpenAI embeddings can use larger dimensions and increase DB size accordingly.
+- Hash fallback embeddings use 256 dimensions.
+- OpenAI embeddings can use larger dimensions depending on model (typically 1536–3072) and increase DB size accordingly.
 
 Approximate DB size planning:
 
