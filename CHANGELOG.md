@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.3.0...v0.4.0) (2026-09-20)
+
+
+### Features
+
+* **config:** add an optional YAML config file for db and embedding settings ([1d063c6](https://github.com/gkoos/confluence2md-indexer/commit/1d063c6381ffd09776d77a7cac85b670892e8f5a))
+
 ## [0.3.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.2.0...v0.3.0) (2026-09-20)
 
 
