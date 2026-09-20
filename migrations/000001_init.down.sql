@@ -1,5 +1,0 @@
-DROP TABLE IF EXISTS embeddings;
-DROP TABLE IF EXISTS chunks;
-DROP TABLE IF EXISTS documents;
-DROP TABLE IF EXISTS runs;
-DROP TABLE IF EXISTS schema_version;

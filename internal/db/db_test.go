@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
+	"github.com/gkoos/confluence2md-indexer/internal/embedding/embeddingtest"
 )
 
 func TestMigrateAndRunLifecycle(t *testing.T) {
@@ -37,8 +38,11 @@ func TestMigrateAndRunLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get stats: %v", err)
 	}
-	if stats.SchemaVersion != CurrentSchemaVersion {
-		t.Fatalf("expected schema version %d got %d", CurrentSchemaVersion, stats.SchemaVersion)
+	if stats.VectorReady {
+		t.Fatal("expected no vector channel before embeddings are written")
+	}
+	if len(stats.EmbeddingModels) != 0 {
+		t.Fatalf("expected no embedding identities, got %v", stats.EmbeddingModels)
 	}
 	if stats.Runs != 1 {
 		t.Fatalf("expected runs=1 got %d", stats.Runs)
@@ -67,7 +71,7 @@ func TestUpsertDocumentWithChunksLifecycle(t *testing.T) {
 	}
 	chunks := []ChunkRecord{{ID: "1:000000", ChunkIndex: 0, Text: "hello", ChunkHash: "c1"}}
 
-	status, written, err := UpsertDocumentWithChunks(ctx, database, doc, chunks)
+	status, written, err := UpsertDocumentWithChunks(ctx, database, doc, chunks, "")
 	if err != nil {
 		t.Fatalf("insert doc: %v", err)
 	}
@@ -75,7 +79,7 @@ func TestUpsertDocumentWithChunksLifecycle(t *testing.T) {
 		t.Fatalf("unexpected insert status=%s written=%d", status, written)
 	}
 
-	status, written, err = UpsertDocumentWithChunks(ctx, database, doc, chunks)
+	status, written, err = UpsertDocumentWithChunks(ctx, database, doc, chunks, "")
 	if err != nil {
 		t.Fatalf("skip doc: %v", err)
 	}
@@ -85,7 +89,7 @@ func TestUpsertDocumentWithChunksLifecycle(t *testing.T) {
 
 	doc.ContentHash = "hash2"
 	chunks = []ChunkRecord{{ID: "1:000000", ChunkIndex: 0, Text: "updated", ChunkHash: "c2"}}
-	status, written, err = UpsertDocumentWithChunks(ctx, database, doc, chunks)
+	status, written, err = UpsertDocumentWithChunks(ctx, database, doc, chunks, "")
 	if err != nil {
 		t.Fatalf("update doc: %v", err)
 	}
@@ -114,7 +118,7 @@ func TestDeleteDocumentsNotIn(t *testing.T) {
 			Title:       "Doc",
 			LocalPath:   id + ".md",
 			ContentHash: "h" + id,
-		}, nil)
+		}, nil, "")
 		if err != nil {
 			t.Fatalf("seed doc %s: %v", id, err)
 		}
@@ -151,7 +155,7 @@ func TestSearchLexicalAndVectorWithFilters(t *testing.T) {
 		SourceURL:      "https://example.test/1",
 		LastModifiedAt: "2026-01-10T00:00:00Z",
 		ContentHash:    "h1",
-	}, []ChunkRecord{{ID: "1:000000", ChunkIndex: 0, Text: "banana apple", ChunkHash: "c1"}})
+	}, []ChunkRecord{{ID: "1:000000", ChunkIndex: 0, Text: "banana apple", ChunkHash: "c1"}}, "")
 	if err != nil {
 		t.Fatalf("seed doc 1: %v", err)
 	}
@@ -165,19 +169,19 @@ func TestSearchLexicalAndVectorWithFilters(t *testing.T) {
 		SourceURL:      "https://example.test/2",
 		LastModifiedAt: "2025-01-10T00:00:00Z",
 		ContentHash:    "h2",
-	}, []ChunkRecord{{ID: "2:000000", ChunkIndex: 0, Text: "grape orange", ChunkHash: "c2"}})
+	}, []ChunkRecord{{ID: "2:000000", ChunkIndex: 0, Text: "grape orange", ChunkHash: "c2"}}, "")
 	if err != nil {
 		t.Fatalf("seed doc 2: %v", err)
 	}
 
-	provider := embedding.NewHashProvider(8)
-	vectors, err := provider.Embed(ctx, []string{"banana apple", "grape orange"})
+	provider := embeddingtest.New(8)
+	vectors, err := provider.Embed(ctx, embedding.KindDocument, []string{"banana apple", "grape orange"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	_, err = UpsertEmbeddings(ctx, database, []EmbeddingRecord{
-		{ChunkID: "1:000000", Model: provider.Name(), Dimension: len(vectors[0]), Vector: vectors[0]},
-		{ChunkID: "2:000000", Model: provider.Name(), Dimension: len(vectors[1]), Vector: vectors[1]},
+		{ChunkID: "1:000000", Name: provider.Name(), Dimension: len(vectors[0]), Vector: vectors[0]},
+		{ChunkID: "2:000000", Name: provider.Name(), Dimension: len(vectors[1]), Vector: vectors[1]},
 	})
 	if err != nil {
 		t.Fatalf("upsert embeddings: %v", err)
@@ -191,12 +195,20 @@ func TestSearchLexicalAndVectorWithFilters(t *testing.T) {
 		t.Fatalf("expected lexical top chunk 1:000000")
 	}
 
-	vector, err := SearchVector(ctx, database, vectors[0], SearchFilters{Candidate: 5})
+	vector, err := SearchVector(ctx, database, vectors[0], SearchFilters{Candidate: 5, EmbeddingName: provider.Name()})
 	if err != nil {
 		t.Fatalf("search vector: %v", err)
 	}
 	if len(vector) == 0 || vector[0].ChunkID != "1:000000" {
 		t.Fatalf("expected vector top chunk 1:000000")
+	}
+
+	mismatched, err := SearchVector(ctx, database, vectors[0], SearchFilters{Candidate: 5, EmbeddingName: "bow-local:fnv1a@256"})
+	if err != nil {
+		t.Fatalf("search vector with a different identity: %v", err)
+	}
+	if len(mismatched) != 0 {
+		t.Fatalf("expected no candidates for another embedding identity, got %d", len(mismatched))
 	}
 
 	filtered, err := SearchLexical(ctx, database, "banana", SearchFilters{Candidate: 5, SpaceKey: "OPS"})
@@ -205,6 +217,78 @@ func TestSearchLexicalAndVectorWithFilters(t *testing.T) {
 	}
 	if len(filtered) != 0 {
 		t.Fatalf("expected no lexical results for non-matching space filter")
+	}
+}
+
+// TestUpsertReembedsWhenIdentityChanges covers the provider-switch bug: the
+// content hash alone used to decide skipping, so changing embedding provider
+// left the corpus holding vectors from the previous space forever.
+func TestUpsertReembedsWhenIdentityChanges(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	ctx := context.Background()
+	if err := Migrate(ctx, database); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	doc := DocumentRecord{
+		ID:          "1",
+		PageID:      "1",
+		Title:       "Alpha",
+		LocalPath:   "a.md",
+		ContentHash: "h1",
+	}
+	chunks := []ChunkRecord{{ID: "1:000000", ChunkIndex: 0, Text: "banana", ChunkHash: "c1"}}
+
+	status, _, err := UpsertDocumentWithChunks(ctx, database, doc, chunks, "identity-a")
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if status != "inserted" {
+		t.Fatalf("expected inserted, got %q", status)
+	}
+
+	provider := embeddingtest.New(4)
+	vectors, err := provider.Embed(ctx, embedding.KindDocument, []string{"banana"})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	if _, err := UpsertEmbeddings(ctx, database, []EmbeddingRecord{{
+		ChunkID:   "1:000000",
+		Name:      "identity-a",
+		Dimension: len(vectors[0]),
+		Vector:    vectors[0],
+	}}); err != nil {
+		t.Fatalf("upsert embeddings: %v", err)
+	}
+
+	status, _, err = UpsertDocumentWithChunks(ctx, database, doc, chunks, "identity-a")
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if status != "skipped" {
+		t.Fatalf("expected skipped when content and identity both match, got %q", status)
+	}
+
+	status, _, err = UpsertDocumentWithChunks(ctx, database, doc, chunks, "identity-b")
+	if err != nil {
+		t.Fatalf("third upsert: %v", err)
+	}
+	if status != "updated" {
+		t.Fatalf("expected updated when the identity changed, got %q", status)
+	}
+
+	status, _, err = UpsertDocumentWithChunks(ctx, database, doc, chunks, "")
+	if err != nil {
+		t.Fatalf("fourth upsert: %v", err)
+	}
+	if status != "skipped" {
+		t.Fatalf("expected skipped when embeddings are disabled, got %q", status)
 	}
 }
 
@@ -234,7 +318,7 @@ func TestFetchChunkWindow(t *testing.T) {
 		{ID: "doc:000000", ChunkIndex: 0, Text: "zero", ChunkHash: "c0"},
 		{ID: "doc:000001", ChunkIndex: 1, Text: "one", ChunkHash: "c1"},
 		{ID: "doc:000002", ChunkIndex: 2, Text: "two", ChunkHash: "c2"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("seed doc: %v", err)
 	}

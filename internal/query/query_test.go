@@ -9,13 +9,14 @@ import (
 
 	"github.com/gkoos/confluence2md-indexer/internal/db"
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
+	"github.com/gkoos/confluence2md-indexer/internal/embedding/embeddingtest"
 )
 
 func TestRunHybridWeightedPrefersLexicalWithHighAlpha(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, total, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, total, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "banana",
 		Mode:       "hybrid",
 		Fusion:     "weighted",
@@ -41,7 +42,7 @@ func TestRunHybridRRFCombinesBothChannels(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, _, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "banana",
 		Mode:       "hybrid",
 		Fusion:     "rrf",
@@ -67,7 +68,7 @@ func TestRunTopKLimit(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, _, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "banana",
 		Mode:       "lexical",
 		TopK:       1,
@@ -85,7 +86,7 @@ func TestRunExpandStitchesNeighborChunks(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, _, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "middleterm",
 		Mode:       "lexical",
 		TopK:       1,
@@ -119,7 +120,7 @@ func TestRunPaginationOffsetLimit(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, total, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, total, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "neighbor",
 		Mode:       "lexical",
 		TopK:       5,
@@ -152,6 +153,80 @@ func TestFuseLexicalFiltersZeroScoreTail(t *testing.T) {
 	}
 	if results[0].ChunkID != "c-keep" {
 		t.Fatalf("expected c-keep to remain, got %s", results[0].ChunkID)
+	}
+}
+
+func TestRunRejectsEmbeddingIdentityMismatch(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	// Querying with a provider whose vectors live in another space must fail with
+	// a diagnostic instead of scoring zero everywhere and returning no results.
+	other := embeddingtest.NewWithCaps("stub:other", 8, embedding.Caps{Semantic: true})
+
+	_, _, err := Run(context.Background(), database, other, Request{
+		Text:       "banana",
+		Mode:       "hybrid",
+		TopK:       5,
+		CandidateK: 10,
+	})
+	if err == nil || !strings.Contains(err.Error(), "embedding mismatch") {
+		t.Fatalf("expected an embedding mismatch error, got %v", err)
+	}
+
+	// Lexical retrieval must keep working without the vector channel.
+	results, _, err := Run(context.Background(), database, other, Request{
+		Text:       "banana",
+		Mode:       "lexical",
+		TopK:       5,
+		CandidateK: 10,
+	})
+	if err != nil {
+		t.Fatalf("lexical query failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected lexical results despite the embedding mismatch")
+	}
+}
+
+func TestRunRejectsVectorModeWithoutEmbeddings(t *testing.T) {
+	database := setupQueryTestDB(t)
+
+	_, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text: "banana",
+		Mode: "vector",
+	})
+	if err == nil || !strings.Contains(err.Error(), "holds no embeddings") {
+		t.Fatalf("expected a missing embeddings error, got %v", err)
+	}
+}
+
+func TestRunRejectsMixedEmbeddingIdentities(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	provider := embeddingtest.New(8)
+	vectors, err := provider.Embed(context.Background(), embedding.KindDocument, []string{"banana"})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+
+	// Simulate an index that was written by two different providers.
+	if _, err := db.UpsertEmbeddings(context.Background(), database, []db.EmbeddingRecord{{
+		ChunkID:   "p2:000000",
+		Name:      "stub:other",
+		Dimension: len(vectors[0]),
+		Vector:    vectors[0],
+	}}); err != nil {
+		t.Fatalf("upsert embeddings: %v", err)
+	}
+
+	_, _, err = Run(context.Background(), database, provider, Request{
+		Text: "banana",
+		Mode: "hybrid",
+	})
+	if err == nil || !strings.Contains(err.Error(), "mixes embedding identities") {
+		t.Fatalf("expected a mixed identity error, got %v", err)
 	}
 }
 
@@ -224,25 +299,26 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 		},
 	}
 
+	provider := embeddingtest.New(8)
+
 	for _, item := range docs {
-		if _, _, err := db.UpsertDocumentWithChunks(context.Background(), database, item.doc, item.chunks); err != nil {
+		if _, _, err := db.UpsertDocumentWithChunks(context.Background(), database, item.doc, item.chunks, provider.Name()); err != nil {
 			t.Fatalf("upsert doc %s: %v", item.doc.ID, err)
 		}
 	}
 
-	provider := embedding.NewHashProvider(8)
 	texts := []string{"apple and pear", "banana banana yellow", "left neighbor", "middleterm center", "right neighbor"}
-	vectors, err := provider.Embed(context.Background(), texts)
+	vectors, err := provider.Embed(context.Background(), embedding.KindDocument, texts)
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 
 	_, err = db.UpsertEmbeddings(context.Background(), database, []db.EmbeddingRecord{
-		{ChunkID: "p1:000000", Model: provider.Name(), Dimension: len(vectors[0]), Vector: vectors[0]},
-		{ChunkID: "p2:000000", Model: provider.Name(), Dimension: len(vectors[1]), Vector: vectors[1]},
-		{ChunkID: "p3:000000", Model: provider.Name(), Dimension: len(vectors[2]), Vector: vectors[2]},
-		{ChunkID: "p3:000001", Model: provider.Name(), Dimension: len(vectors[3]), Vector: vectors[3]},
-		{ChunkID: "p3:000002", Model: provider.Name(), Dimension: len(vectors[4]), Vector: vectors[4]},
+		{ChunkID: "p1:000000", Name: provider.Name(), Dimension: len(vectors[0]), Vector: vectors[0]},
+		{ChunkID: "p2:000000", Name: provider.Name(), Dimension: len(vectors[1]), Vector: vectors[1]},
+		{ChunkID: "p3:000000", Name: provider.Name(), Dimension: len(vectors[2]), Vector: vectors[2]},
+		{ChunkID: "p3:000001", Name: provider.Name(), Dimension: len(vectors[3]), Vector: vectors[3]},
+		{ChunkID: "p3:000002", Name: provider.Name(), Dimension: len(vectors[4]), Vector: vectors[4]},
 	})
 	if err != nil {
 		t.Fatalf("upsert embeddings: %v", err)

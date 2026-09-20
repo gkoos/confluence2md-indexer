@@ -34,6 +34,8 @@ What you get:
 - Ingests markdown pages into normalized chunks.
 - Persists document and chunk records to SQLite.
 - Stores embeddings for changed chunks.
+- Records the embedding identity with every vector, so switching provider re-embeds the corpus instead of mixing vector spaces.
+- Refuses to run a vector or hybrid query against mismatched vectors instead of returning empty results.
 - Executes lexical, vector, or hybrid retrieval with configurable fusion.
 - Supports deterministic pagination using `--offset` and `--limit`.
 - Emits human-readable and machine-readable output for index/query/stats commands.
@@ -83,7 +85,7 @@ confluence2md-indexer stats --db ./output/confluence2md-index.db --json
 ### CLI Usage
 
 ```text
-confluence2md-indexer index [folder] [--db path] [--rebuild] [--json]
+confluence2md-indexer index [folder] [--db path] [--rebuild] [--json] [--skip-embeddings]
 confluence2md-indexer query --q text
   [--db path]
   [--mode hybrid|lexical|vector]
@@ -92,9 +94,18 @@ confluence2md-indexer query --q text
   [--offset N] [--limit N]
   [--space key] [--page-id id] [--from YYYY-MM-DD] [--to YYYY-MM-DD]
   [--expand N]
-  [--json] [--explain]
+  [--json] [--explain] [--lexical-only]
+  [--embedding id] [--embedding-model name] [--embedding-base-url url]
+  [--embedding-dim N] [--embedding-api-key-env VAR] [--embedding-header k=v]
+  [--embedding-query-param k=v] [--embedding-document-prefix text]
+  [--embedding-query-prefix text] [--embedding-batch-size N]
+  [--embedding-timeout dur] [--embedding-max-retries N]
+  [--embedding-auth-header name] [--embedding-auth-scheme scheme] [--embedding-path path]
 confluence2md-indexer stats [--db path] [--json]
 ```
+
+Use `--embedding list` to print the available providers. Index and query must be
+given the same embedding settings; see [docs/embedding-providers.md](docs/embedding-providers.md).
 
 See [docs/query-examples.md](docs/query-examples.md) for practical command patterns.
 
@@ -153,7 +164,11 @@ if err != nil {
 }
 defer database.Close()
 
-provider := embedding.NewDefaultFromEnv().Provider
+resolution, err := embedding.Resolve(embedding.Options{})
+if err != nil {
+	// handle error
+}
+provider := resolution.Provider
 
 results, total, err := query.Run(ctx, database, provider, query.Request{
 	Text: "how to rotate secrets",
@@ -174,21 +189,22 @@ The indexer reads:
 ### Indexing Flow
 
 1. Run preflight checks on metadata and markdown paths.
-2. Open or create SQLite database.
-3. Apply migrations and ensure schema compatibility.
+2. Open or create the SQLite database and create the schema when it is absent.
+3. Resolve the embedding provider from flags, environment and defaults.
 4. Convert pages into chunk records.
-5. Upsert changed documents/chunks.
-6. Generate embeddings for changed chunks only.
-7. Remove stale records no longer present in source metadata.
-8. Record run metadata and emit index summary.
+5. Upsert documents whose content or embedding identity changed.
+6. Generate embeddings for the changed chunks, in batches.
+7. Remove stale records and vectors belonging to other identities.
+8. Record the run, including its embedding identity, and emit the index summary.
 
 ### Query Flow
 
 1. Parse query request, filters, and pagination options.
-2. Run lexical search (FTS5), vector search, or both.
-3. Fuse candidate scores (weighted or RRF).
-4. Apply deterministic paging and optional context expansion.
-5. Return results as text output or JSON contract.
+2. For vector and hybrid modes, resolve the embedding provider and verify it matches the identities stored in the index.
+3. Run lexical search (FTS5), vector search, or both.
+4. Fuse candidate scores (weighted or RRF).
+5. Apply deterministic paging and optional context expansion.
+6. Return results as text output or JSON contract.
 
 ## Output Contracts
 
@@ -203,19 +219,22 @@ This tool is optimized for local developer workflows, not large multi-tenant ser
 
 ### Embedding Provider Setup
 
-Indexing works with or without an OpenAI API key. The embedding provider is automatically selected based on environment:
+Embedding providers are pluggable and are selected explicitly or from the environment:
 
-- **Hash fallback (default)**: If `OPENAI_API_KEY` is unset or empty, embeddings are generated deterministically using SHA256 hashing at 256 dimensions. No network calls, no cost. Suitable for small internal docs and exact-match searches.
-- **OpenAI embeddings**: If `OPENAI_API_KEY` is set, embeddings use the OpenAI API (default model: `text-embedding-3-small`). Trained embeddings capture semantic meaning, significantly improving vector search quality. Optional: set `OPENAI_EMBED_MODEL` to use a different model (e.g., `text-embedding-3-large` for higher dimensions). Note: API calls incur cost per token.
+- **`bow-local`** (default, offline): a local bag-of-words hashing provider. No network, no key, no cost, fully deterministic, 256 dimensions. Its vectors measure term overlap rather than meaning, so they complement BM25 instead of replacing it.
+- **`openai`**: the OpenAI embeddings API, selected with `--embedding openai` and `OPENAI_API_KEY` (default model `text-embedding-3-small`). Token costs apply.
+- **`openai-compatible`**: any endpoint speaking the OpenAI embeddings protocol, including Azure OpenAI, Ollama, LM Studio, llama.cpp server, vLLM and hosted providers such as SiliconFlow. Requires `--embedding-base-url`, `--embedding-model` and `--embedding-dim`.
 
-**When to use each:**
-- Hash fallback: Dev workflows, offline testing, cost-sensitive use, when lexical search (`--mode lexical`) is sufficient.
-- OpenAI embeddings: Production RAG, semantic search importance, hybrid retrieval tuning, large or complex technical corpora.
+Providers are resolved from flags first, then `CONFLUENCE2MD_EMBEDDING_*` environment variables, then the offline default; `OPENAI_API_KEY` no longer selects OpenAI on its own. `--embedding list` prints the registered providers.
+
+Index and query must resolve to the same **identity**, because vectors from different models or dimensions are not comparable. A mismatch is reported with exit code 2 instead of returning empty results, and re-indexing with a different provider re-embeds the corpus automatically.
+
+Setup recipes, the complete flag reference and a troubleshooting table are in [docs/embedding-providers.md](docs/embedding-providers.md).
 
 Current practical limits depend mostly on chunk count and embedding dimension.
 
-- Hash fallback embeddings use 256 dimensions.
-- OpenAI embeddings can use larger dimensions depending on model (typically 1536–3072) and increase DB size accordingly.
+- 256 dimensions (the offline default) cost about 1 KB per chunk.
+- Larger models (1024-3072 dimensions) increase DB size accordingly, at roughly 4-12 KB per chunk.
 
 Approximate DB size planning:
 
@@ -263,6 +282,7 @@ Use `Est. chunks` with the sizing ranges above to choose incremental vs rebuild 
 Operational limitations:
 
 - Rebuild mode recreates the DB file (destructive to prior DB content at that path).
+- Index and query must use the same embedding identity; a mismatch is reported instead of returning empty results.
 - SQLite write concurrency is limited; avoid parallel writers to the same DB file.
 - Query latency grows with corpus size, filter breadth, and candidate counts.
 - Vector quality and ranking behavior depend on embedding provider/model and corpus quality.
@@ -272,18 +292,21 @@ Operational limitations:
 ```sh
 task test
 task coverage:check
+task smoke:vector
 task lint
 ```
 
 Release and CI behavior:
 
 - coverage gate enforced in CI (`COVERAGE_MIN`, default 70)
+- offline vector smoke gate (`task smoke:vector`) runs in the test job
 - reproducible release builds across linux/windows/darwin on amd64 and arm64
 - contract tests for JSON command outputs
 
 ## Internals Documentation
 
 - [Query examples](docs/query-examples.md)
+- [Embedding providers](docs/embedding-providers.md)
 - [Output reference](docs/output-reference.md)
 - [Architecture and data flow](docs/architecture.md)
 - [Operations and troubleshooting](docs/operations.md)
@@ -296,7 +319,6 @@ Release and CI behavior:
 ```text
 cmd/                 CLI entrypoint
 internal/            internal packages (cli, service, db, indexer, query, embedding, ...)
-migrations/          SQL migrations
 docs/                user and design documentation
 .github/workflows/   CI and release workflows
 ```

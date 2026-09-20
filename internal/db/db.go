@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -17,14 +18,7 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 )
 
-const CurrentSchemaVersion = 1
-
 const initSchemaSQL = `
-CREATE TABLE IF NOT EXISTS schema_version (
-  version INTEGER PRIMARY KEY,
-  applied_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
   started_at TEXT NOT NULL,
@@ -37,6 +31,9 @@ CREATE TABLE IF NOT EXISTS documents (
   page_id TEXT NOT NULL,
   title TEXT NOT NULL,
   local_path TEXT NOT NULL,
+  space_key TEXT NOT NULL DEFAULT '',
+  source_url TEXT NOT NULL DEFAULT '',
+  last_modified_at TEXT NOT NULL DEFAULT '',
   content_hash TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -52,11 +49,12 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 
 CREATE TABLE IF NOT EXISTS embeddings (
-  chunk_id TEXT PRIMARY KEY,
-  model TEXT NOT NULL,
+  chunk_id TEXT NOT NULL,
+  name TEXT NOT NULL,
   dimension INTEGER NOT NULL,
   vector BLOB NOT NULL,
   updated_at TEXT NOT NULL,
+  PRIMARY KEY (chunk_id, name),
   FOREIGN KEY(chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
 );
 
@@ -68,9 +66,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   space_key
 );
 
-INSERT INTO schema_version(version, applied_at)
-VALUES (1, CURRENT_TIMESTAMP)
-ON CONFLICT(version) DO NOTHING;
+CREATE TABLE IF NOT EXISTS embedding_runs (
+  run_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  dimension INTEGER NOT NULL,
+  capability TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
 `
 
 type Run struct {
@@ -80,12 +83,51 @@ type Run struct {
 	Mode        string
 }
 
+// Stats summarises the index for the stats command.
 type Stats struct {
-	SchemaVersion int `json:"schemaVersion"`
-	Runs          int `json:"runs"`
-	Documents     int `json:"documents"`
-	Chunks        int `json:"chunks"`
-	Embeddings    int `json:"embeddings"`
+	Runs       int `json:"runs"`
+	Documents  int `json:"documents"`
+	Chunks     int `json:"chunks"`
+	Embeddings int `json:"embeddings"`
+	// VectorReady reports whether a usable vector channel exists in this index.
+	VectorReady bool `json:"vectorReady"`
+	// VectorName is the embedding identity stored in the index, empty when the
+	// index holds no embeddings.
+	VectorName string `json:"vectorName"`
+	// VectorCapability describes the most recent embedding run
+	// (semantic, lexical or none).
+	VectorCapability string `json:"vectorCapability"`
+	// EmbeddingModels lists the distinct identities and sizes present.
+	EmbeddingModels []EmbeddingModelStat `json:"embeddingModels"`
+}
+
+// EmbeddingModelStat counts stored vectors per identity.
+type EmbeddingModelStat struct {
+	Name      string `json:"name"`
+	Dimension int    `json:"dimension"`
+	Chunks    int    `json:"chunks"`
+}
+
+// Manifest describes the embeddings actually stored in an index. It is the
+// authority for detecting a provider that no longer matches the stored vectors.
+type Manifest struct {
+	// Names holds the distinct embedding identities present, sorted.
+	Names []string
+	// Chunks is the total number of stored vectors.
+	Chunks int
+	// Models lists per-identity counts.
+	Models []EmbeddingModelStat
+	// Capability comes from the most recent embedding run, empty when unknown.
+	Capability string
+}
+
+// SingleName returns the stored identity when the index holds exactly one, and
+// an empty string when the index is empty or mixes identities.
+func (m *Manifest) SingleName() string {
+	if m == nil || len(m.Names) != 1 {
+		return ""
+	}
+	return m.Names[0]
 }
 
 type DocumentRecord struct {
@@ -111,9 +153,10 @@ type ChunkWindowItem struct {
 	Text       string
 }
 
+// EmbeddingRecord is one stored vector, keyed by chunk and embedding identity.
 type EmbeddingRecord struct {
 	ChunkID   string
-	Model     string
+	Name      string
 	Dimension int
 	Vector    []float32
 }
@@ -139,6 +182,11 @@ type SearchFilters struct {
 	FromDate  string
 	ToDate    string
 	Candidate int
+	// EmbeddingName restricts vector search to one embedding identity. It is set
+	// by the query pipeline after the provider has been checked against the
+	// identities actually stored in the index, so it is not part of the request
+	// contract.
+	EmbeddingName string `json:"-"`
 }
 
 func Open(path string) (*sql.DB, error) {
@@ -174,58 +222,18 @@ func Open(path string) (*sql.DB, error) {
 	return database, nil
 }
 
+// Migrate creates the schema when it is absent.
+//
+// The schema is deliberately unversioned: there are no released users yet, so a
+// database written by an older build is recreated with --rebuild rather than
+// upgraded in place.
 func Migrate(ctx context.Context, database *sql.DB) error {
 	if database == nil {
 		return fmt.Errorf("database is nil")
 	}
 
 	if _, err := database.ExecContext(ctx, initSchemaSQL); err != nil {
-		return fmt.Errorf("apply schema migration: %w", err)
-	}
-
-	if err := ensureDocumentColumn(ctx, database, "space_key", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureDocumentColumn(ctx, database, "source_url", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureDocumentColumn(ctx, database, "last_modified_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ensureDocumentColumn(ctx context.Context, database *sql.DB, name string, definition string) error {
-	rows, err := database.QueryContext(ctx, `PRAGMA table_info(documents)`)
-	if err != nil {
-		return fmt.Errorf("inspect documents schema: %w", err)
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	for rows.Next() {
-		var cid int
-		var colName string
-		var colType string
-		var notNull int
-		var dflt any
-		var pk int
-		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dflt, &pk); err != nil {
-			return fmt.Errorf("scan documents schema: %w", err)
-		}
-		if colName == name {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate documents schema: %w", err)
-	}
-
-	q := fmt.Sprintf("ALTER TABLE documents ADD COLUMN %s %s", name, definition)
-	if _, err := database.ExecContext(ctx, q); err != nil {
-		return fmt.Errorf("add documents column %s: %w", name, err)
+		return fmt.Errorf("apply schema: %w", err)
 	}
 
 	return nil
@@ -287,11 +295,8 @@ func GetStats(ctx context.Context, database *sql.DB) (*Stats, error) {
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	stats := &Stats{}
+	stats := &Stats{EmbeddingModels: []EmbeddingModelStat{}}
 
-	if err := database.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&stats.SchemaVersion); err != nil {
-		return nil, fmt.Errorf("query schema_version: %w", err)
-	}
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&stats.Runs); err != nil {
 		return nil, fmt.Errorf("query runs count: %w", err)
 	}
@@ -301,14 +306,148 @@ func GetStats(ctx context.Context, database *sql.DB) (*Stats, error) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM chunks`).Scan(&stats.Chunks); err != nil {
 		return nil, fmt.Errorf("query chunks count: %w", err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM embeddings`).Scan(&stats.Embeddings); err != nil {
-		return nil, fmt.Errorf("query embeddings count: %w", err)
+
+	manifest, err := EmbeddingManifest(ctx, database)
+	if err != nil {
+		return nil, err
 	}
+
+	stats.Embeddings = manifest.Chunks
+	stats.EmbeddingModels = manifest.Models
+	stats.VectorName = manifest.SingleName()
+	stats.VectorReady = stats.VectorName != ""
+	stats.VectorCapability = manifest.Capability
 
 	return stats, nil
 }
 
-func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc DocumentRecord, chunks []ChunkRecord) (string, int, error) {
+// EmbeddingManifest reports which embeddings are stored so callers can detect
+// that the configured provider no longer matches the index.
+func EmbeddingManifest(ctx context.Context, database *sql.DB) (*Manifest, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+
+	manifest := &Manifest{Models: []EmbeddingModelStat{}, Names: []string{}}
+
+	rows, err := database.QueryContext(ctx, `
+SELECT name, dimension, COUNT(*)
+FROM embeddings
+GROUP BY name, dimension
+ORDER BY name ASC, dimension ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query embedding manifest: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	names := make([]string, 0, 4)
+	for rows.Next() {
+		var model EmbeddingModelStat
+		if err := rows.Scan(&model.Name, &model.Dimension, &model.Chunks); err != nil {
+			return nil, fmt.Errorf("scan embedding manifest: %w", err)
+		}
+		manifest.Models = append(manifest.Models, model)
+		manifest.Chunks += model.Chunks
+		if len(names) == 0 || names[len(names)-1] != model.Name {
+			names = append(names, model.Name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate embedding manifest: %w", err)
+	}
+	manifest.Names = names
+
+	var capability string
+	err = database.QueryRowContext(ctx, `SELECT capability FROM embedding_runs ORDER BY updated_at DESC LIMIT 1`).Scan(&capability)
+	switch {
+	case err == nil:
+		manifest.Capability = capability
+	case errors.Is(err, sql.ErrNoRows):
+		// No embedding run recorded yet; the index predates run tracking.
+	default:
+		return nil, fmt.Errorf("query embedding runs: %w", err)
+	}
+
+	return manifest, nil
+}
+
+// RecordEmbeddingRun stores which identity produced the vectors of a run.
+func RecordEmbeddingRun(ctx context.Context, database *sql.DB, runID string, name string, dimension int, capability string) error {
+	if database == nil {
+		return fmt.Errorf("database is nil")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is empty")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("embedding name is empty")
+	}
+
+	const q = `INSERT INTO embedding_runs(run_id, name, dimension, capability, updated_at)
+VALUES(?, ?, ?, ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET name=excluded.name, dimension=excluded.dimension, capability=excluded.capability, updated_at=excluded.updated_at`
+
+	if _, err := database.ExecContext(ctx, q, runID, name, dimension, capability, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("record embedding run: %w", err)
+	}
+
+	return nil
+}
+
+// countChunkEmbeddings counts stored vectors for one document under one identity.
+func countChunkEmbeddings(ctx context.Context, database *sql.DB, documentID string, name string) (int, error) {
+	if strings.TrimSpace(name) == "" {
+		return 0, nil
+	}
+
+	var count int
+	err := database.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM embeddings e
+JOIN chunks c ON c.id = e.chunk_id
+WHERE c.document_id = ? AND e.name = ?`, documentID, name).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count chunk embeddings: %w", err)
+	}
+
+	return count, nil
+}
+
+// DeleteEmbeddingsNotNamed removes vectors belonging to another identity, so an
+// index only ever holds one vector space.
+func DeleteEmbeddingsNotNamed(ctx context.Context, database *sql.DB, name string) (int64, error) {
+	if database == nil {
+		return 0, fmt.Errorf("database is nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, fmt.Errorf("embedding name is empty")
+	}
+
+	res, err := database.ExecContext(ctx, `DELETE FROM embeddings WHERE name != ?`, name)
+	if err != nil {
+		return 0, fmt.Errorf("delete stale embeddings: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected deleting stale embeddings: %w", err)
+	}
+
+	return rows, nil
+}
+
+// UpsertDocumentWithChunks writes a document and its chunks, and reports whether
+// they were inserted, updated or skipped.
+//
+// embeddingName is the identity of the vectors the caller intends to store. A
+// document is skipped only when its content is unchanged AND its chunks already
+// carry vectors for that identity, so switching provider re-embeds the corpus
+// instead of silently keeping vectors from the previous one.
+func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc DocumentRecord, chunks []ChunkRecord, embeddingName string) (string, int, error) {
 	if database == nil {
 		return "", 0, fmt.Errorf("database is nil")
 	}
@@ -328,7 +467,16 @@ func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc Documen
 	}
 	isNew := err == sql.ErrNoRows
 	if err == nil && existingHash == doc.ContentHash {
-		return "skipped", 0, nil
+		if strings.TrimSpace(embeddingName) == "" {
+			return "skipped", 0, nil
+		}
+		stored, err := countChunkEmbeddings(ctx, database, doc.ID, embeddingName)
+		if err != nil {
+			return "", 0, err
+		}
+		if stored == len(chunks) {
+			return "skipped", 0, nil
+		}
 	}
 
 	tx, err := database.BeginTx(ctx, nil)
@@ -393,14 +541,17 @@ func UpsertEmbeddings(ctx context.Context, database *sql.DB, records []Embedding
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	const q = `INSERT INTO embeddings(chunk_id, model, dimension, vector, updated_at)
+	const q = `INSERT INTO embeddings(chunk_id, name, dimension, vector, updated_at)
 	VALUES(?, ?, ?, ?, ?)
-	ON CONFLICT(chunk_id) DO UPDATE SET model=excluded.model, dimension=excluded.dimension, vector=excluded.vector, updated_at=excluded.updated_at`
+	ON CONFLICT(chunk_id, name) DO UPDATE SET dimension=excluded.dimension, vector=excluded.vector, updated_at=excluded.updated_at`
 
 	written := 0
 	for _, rec := range records {
 		if strings.TrimSpace(rec.ChunkID) == "" {
 			continue
+		}
+		if strings.TrimSpace(rec.Name) == "" {
+			return 0, fmt.Errorf("invalid embedding identity for chunk %s", rec.ChunkID)
 		}
 		if rec.Dimension <= 0 {
 			return 0, fmt.Errorf("invalid embedding dimension for chunk %s", rec.ChunkID)
@@ -409,7 +560,7 @@ func UpsertEmbeddings(ctx context.Context, database *sql.DB, records []Embedding
 			return 0, fmt.Errorf("embedding dimension mismatch for chunk %s", rec.ChunkID)
 		}
 		blob := encodeFloat32Vector(rec.Vector)
-		if _, err := tx.ExecContext(ctx, q, rec.ChunkID, rec.Model, rec.Dimension, blob, now); err != nil {
+		if _, err := tx.ExecContext(ctx, q, rec.ChunkID, rec.Name, rec.Dimension, blob, now); err != nil {
 			return 0, fmt.Errorf("upsert embedding %s: %w", rec.ChunkID, err)
 		}
 		written++
@@ -561,6 +712,10 @@ func SearchVector(ctx context.Context, database *sql.DB, queryVector []float32, 
 	if strings.TrimSpace(filters.ToDate) != "" {
 		where = append(where, "d.last_modified_at <= ?")
 		args = append(args, strings.TrimSpace(filters.ToDate)+"T23:59:59Z")
+	}
+	if strings.TrimSpace(filters.EmbeddingName) != "" {
+		where = append(where, "e.name = ?")
+		args = append(args, strings.TrimSpace(filters.EmbeddingName))
 	}
 
 	q := fmt.Sprintf(`

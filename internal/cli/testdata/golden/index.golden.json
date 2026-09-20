@@ -6,9 +6,18 @@
   "dbStats": {
     "chunks": 1,
     "documents": 1,
+    "embeddingModels": [
+      {
+        "chunks": 1,
+        "dimension": 256,
+        "name": "bow-local:fnv1a@256"
+      }
+    ],
     "embeddings": 1,
     "runs": 1,
-    "schemaVersion": 1
+    "vectorCapability": "lexical",
+    "vectorName": "bow-local:fnv1a@256",
+    "vectorReady": true
   },
   "documents": {
     "deleted": 0,
@@ -17,8 +26,11 @@
     "updated": 0
   },
   "embedding": {
-    "provider": "hash-local",
-    "source": "hash-fallback",
+    "capability": "lexical",
+    "dimension": 256,
+    "provider": "bow-local:fnv1a@256",
+    "pruned": 0,
+    "source": "default",
     "written": 1
   },
   "incremental": true,

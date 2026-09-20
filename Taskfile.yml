@@ -22,6 +22,11 @@ tasks:
       - task test:coverage
       - go run ./internal/tools/coveragecheck --profile coverage.out
 
+  smoke:vector:
+    desc: Offline vector smoke gate (index, vector query, identity guard)
+    cmds:
+      - go run ./internal/tools/smokevector
+
   lint:
     desc: Run lint checks
     cmds:

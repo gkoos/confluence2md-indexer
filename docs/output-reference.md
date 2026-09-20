@@ -24,14 +24,13 @@ Example:
 index preflight passed: 29 pages, 29 markdown files validated
 db path: <db-path>
 run id: <run-id>
-schema version: 1
 runs recorded: 1
 documents inserted: 29
 documents updated: 0
 documents skipped: 0
 documents deleted: 0
 chunks written: 319
-embeddings written: 319 (hash-local; source=hash-fallback)
+embeddings written: 319 (bow-local:fnv1a@256; source=default, capability=lexical, dim=256)
 mode: full rebuild
 ```
 
@@ -40,11 +39,11 @@ Field meaning:
 - `index preflight passed`: source validation completed.
 - `db path`: active DB file path.
 - `run id`: run-tracking identifier for this indexing run.
-- `schema version`: max schema version in DB.
 - `runs recorded`: total runs persisted in DB run table.
 - `documents inserted/updated/skipped/deleted`: document-level write summary.
 - `chunks written`: chunk rows written during this run.
-- `embeddings written`: embedding rows written plus provider/source.
+- `embeddings written`: embedding rows written, followed by the embedding identity, the configuration layer that chose it, its capability and its dimension.
+- `embeddings pruned`: printed only when vectors belonging to another identity were removed.
 - `mode`: incremental default or full rebuild.
 
 ## JSON Output (`index --json`)
@@ -69,11 +68,16 @@ Top-level fields:
 
 Nested fields:
 
-- `embedding.provider`: embedding provider name.
-- `embedding.source`: provider source resolution (for example hash fallback).
+- `embedding.provider`: the embedding identity, for example `bow-local:fnv1a@256`.
+- `embedding.source`: which configuration layer chose the provider id: `flag`, `env` or `default`.
 - `embedding.written`: embeddings written in this run.
+- `embedding.pruned`: vectors removed because they belonged to another identity.
+- `embedding.dimension`: vector size.
+- `embedding.capability`: `semantic`, `lexical` or `none`.
 - `documents.inserted|updated|skipped|deleted`: per-run document counters.
-- `dbStats.schemaVersion|runs|documents|chunks|embeddings`: DB aggregate counters.
+- `dbStats.runs|documents|chunks|embeddings`: DB aggregate counters.
+- `dbStats.vectorReady|vectorName|vectorCapability`: whether the index holds a usable vector channel, and which identity and capability it recorded.
+- `dbStats.embeddingModels`: per-identity counters (`name`, `dimension`, `chunks`).
 
 ## Query Output
 
@@ -151,6 +155,14 @@ No-results case:
 no results
 ```
 
+Failure cases exit with code 2 and write to stderr, for example:
+
+```text
+query: embedding mismatch: index vectors are "bow-local:fnv1a@64" but the configured provider is "bow-local:fnv1a@256"; re-index with --rebuild, select the stored provider, or query with --mode lexical
+query: the index holds no embeddings to search with "bow-local:fnv1a@256"; re-index with --embedding bow-local:fnv1a@256, or query with --mode lexical
+query: unknown embedding provider "oops" (available: bow-local, openai, openai-compatible)
+```
+
 ## JSON Output (`query --json`)
 
 Top-level fields:
@@ -220,11 +232,13 @@ Note:
 Fields:
 
 - `db path`
-- `schema version`
 - `runs`
 - `documents`
 - `chunks`
 - `embeddings`
+- `vector ready`
+- `embedding identity` (printed when the index holds embeddings)
+- `vector capability` (printed when a capability was recorded)
 
 ## JSON Output (`stats --json`)
 
@@ -237,11 +251,14 @@ Top-level fields:
 
 Nested `stats` fields:
 
-- `schemaVersion`
 - `runs`
 - `documents`
 - `chunks`
 - `embeddings`
+- `vectorReady`
+- `vectorName`
+- `vectorCapability`
+- `embeddingModels` (array of `name`, `dimension`, `chunks`)
 
 ## Notes for Automation
 
