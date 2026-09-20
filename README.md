@@ -96,6 +96,7 @@ confluence2md-indexer query --q text
   [--author name] [--created-by name] [--modified-by name]
   [--depth-min N] [--depth-max N] [--seed-only] [--has-attachments]
   [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--updated-since 30d]
+  [--priors recency,authority,seed,depth,richness] [--prior-strength 0..1] [--recency-half-life 180d]
   [--expand N]
   [--json] [--explain] [--lexical-only]
   [--embedding id] [--embedding-model name] [--embedding-base-url url]
@@ -113,7 +114,11 @@ given the same embedding settings; see [docs/embedding-providers.md](docs/embedd
 The crawler metadata is indexed too, so a query can be narrowed by what it describes:
 `--author`, `--created-by`, `--modified-by`, `--host`, repeated `--space`, `--depth-min`
 and `--depth-max`, `--seed-only`, `--has-attachments` and `--updated-since 30d`. All of
-them are opt-in, and all of them apply to every retrieval mode. Details and examples:
+them are opt-in, and all of them apply to every retrieval mode. Ranking can be nudged by
+the same metadata with `--priors recency,authority,seed,depth,richness`, which is off by
+default and bounded by `--prior-strength`. Retrieval defaults — mode, fusion, alpha,
+`top_k`, `candidate_k`, `expand` and the priors — can live in the `query` section of
+`config.yaml`; a flag you pass still wins. Details and examples:
 [docs/metadata.md](docs/metadata.md).
 
 See [docs/query-examples.md](docs/query-examples.md) for practical command patterns.

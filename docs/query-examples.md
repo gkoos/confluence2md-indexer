@@ -275,3 +275,24 @@ confluence2md-indexer query --db ./confluence2md-index.db --q "rotate secrets" -
 The JSON payload echoes the active filters under `request.filters`, which makes a
 scripted search self-describing.
 
+
+## Nudge the ranking with metadata
+
+```sh
+# prefer recently touched pages when scores are close
+confluence2md-indexer query --db ./confluence2md-index.db --q "retention policy" --priors recency
+
+# prefer the crawl's entry points and hubs, and show what moved
+confluence2md-indexer query --db ./confluence2md-index.db --q "retention policy" \
+  --priors seed,authority --explain
+
+# a stronger nudge, with a shorter recency memory
+confluence2md-indexer query --db ./confluence2md-index.db --q "retention policy" \
+  --priors recency --prior-strength 0.3 --recency-half-life 30d
+```
+
+Priors never replace text relevance: they scale the fused score by at most
+`--prior-strength` (default 0.15), so two clearly different text matches keep their
+order. `--explain` lists the active priors and the factors behind the top result, and
+JSON output carries `metadataBoost` and `metadataFactors` per result when priors are on.
+

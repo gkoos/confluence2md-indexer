@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -399,6 +398,9 @@ func (a *App) runQuery(args []string) int {
 	seedOnly := fs.Bool("seed-only", false, "Keep only the pages the crawl started from")
 	hasAttachments := fs.Bool("has-attachments", false, "Keep only pages that carry an attachment")
 	updatedSince := fs.String("updated-since", "", "Keep pages modified within an age such as 30d, 2w or 12h")
+	priors := fs.String("priors", "", "Metadata ranking priors, comma separated: recency, authority, seed, depth, richness")
+	priorStrength := fs.Float64("prior-strength", 0, "Maximum relative score adjustment from priors (0..1; unset means the default)")
+	recencyHalfLife := fs.String("recency-half-life", "", "Age at which the recency prior falls to half, for example 180d or 6w")
 	pageID := fs.String("page-id", "", "Filter by page_id")
 	fromDate := fs.String("from", "", "Lower bound for last_modified_at (YYYY-MM-DD)")
 	toDate := fs.String("to", "", "Upper bound for last_modified_at (YYYY-MM-DD)")
@@ -421,6 +423,8 @@ func (a *App) runQuery(args []string) int {
 			return exitCodeInvalidUsage
 		}
 		*mode = "lexical"
+		// The flag decided the mode, so it must not be overridden by a file default.
+		visited["mode"] = true
 	}
 
 	flagOptions, err := embeddingValues.options()
@@ -443,6 +447,41 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintf(os.Stderr, "query: %v\n", err)
 		return exitCodeInvalidUsage
 	}
+
+	// The file supplies retrieval defaults for whatever the command line left alone. A
+	// flag that was passed always wins, an empty one included, which is how a single
+	// invocation overrides or clears a configured default.
+	if fileQuery := cfg.File.Query; fileQuery != nil {
+		if !visited["mode"] && fileQuery.Mode != nil {
+			*mode = *fileQuery.Mode
+		}
+		if !visited["fusion"] && fileQuery.Fusion != nil {
+			*fusion = *fileQuery.Fusion
+		}
+		if !visited["alpha"] && fileQuery.Alpha != nil {
+			*alpha = *fileQuery.Alpha
+		}
+		if !visited["top-k"] && fileQuery.TopK != nil {
+			*topK = *fileQuery.TopK
+		}
+		if !visited["candidate-k"] && fileQuery.CandidateK != nil {
+			*candidateK = *fileQuery.CandidateK
+		}
+		if !visited["expand"] && fileQuery.Expand != nil {
+			*expand = *fileQuery.Expand
+		}
+		if !visited["prior-strength"] && fileQuery.PriorStrength != nil {
+			*priorStrength = *fileQuery.PriorStrength
+		}
+		if !visited["recency-half-life"] && fileQuery.RecencyHalfLife != nil {
+			// The flag and the file share one age parser, so the text carries over.
+			*recencyHalfLife = *fileQuery.RecencyHalfLife
+		}
+		if !visited["priors"] && fileQuery.Priors != nil {
+			*priors = strings.Join(fileQuery.Priors, ",")
+		}
+	}
+
 	embeddingOptions, err := resolveEmbeddingOptions(flagOptions, embeddingValues.present(fs), cfg.File)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "query: %v\n", err)
@@ -453,12 +492,12 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintln(os.Stderr, "query requires a non-empty --db path")
 		return exitCodeInvalidUsage
 	}
-	if !isOneOf(*mode, "hybrid", "lexical", "vector") {
-		fmt.Fprintln(os.Stderr, "query --mode must be one of: hybrid, lexical, vector")
+	if !isOneOf(*mode, query.Modes...) {
+		fmt.Fprintf(os.Stderr, "query --mode must be one of: %s\n", strings.Join(query.Modes, ", "))
 		return exitCodeInvalidUsage
 	}
-	if !isOneOf(*fusion, "weighted", "rrf") {
-		fmt.Fprintln(os.Stderr, "query --fusion must be one of: weighted, rrf")
+	if !isOneOf(*fusion, query.Fusions...) {
+		fmt.Fprintf(os.Stderr, "query --fusion must be one of: %s\n", strings.Join(query.Fusions, ", "))
 		return exitCodeInvalidUsage
 	}
 	if *alpha < 0 || *alpha > 1 {
@@ -500,6 +539,24 @@ func (a *App) runQuery(args []string) int {
 	updatedSinceValue, err := parseUpdatedSince(*updatedSince, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
+		return exitCodeInvalidUsage
+	}
+	priorList, err := query.ParsePriors(*priors)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	if *priorStrength < 0 || *priorStrength > 1 {
+		fmt.Fprintln(os.Stderr, "query --prior-strength must be between 0 and 1")
+		return exitCodeInvalidUsage
+	}
+	halfLife, err := query.ParseAge(*recencyHalfLife)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query --recency-half-life %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	if halfLife < 0 {
+		fmt.Fprintln(os.Stderr, "query --recency-half-life must not be negative")
 		return exitCodeInvalidUsage
 	}
 	if _, err := parseOptionalDate("--from", *fromDate); err != nil {
@@ -545,6 +602,12 @@ func (a *App) runQuery(args []string) int {
 			SeedOnly:       *seedOnly,
 			HasAttachments: *hasAttachments,
 			UpdatedSince:   updatedSinceValue,
+		},
+		Priors: query.PriorConfig{
+			Priors:          priorList,
+			Strength:        *priorStrength,
+			RecencyHalfLife: halfLife,
+			Now:             time.Now().UTC(),
 		},
 	}
 
@@ -687,6 +750,14 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "  --has-attachments            only pages that carry an attachment")
 	_, _ = fmt.Fprintln(out, "  --from/--to YYYY-MM-DD       last_modified_at bounds   --updated-since 30d|2w|12h")
 	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Metadata ranking priors, off unless requested (--priors recency,authority,seed,depth,richness):")
+	_, _ = fmt.Fprintln(out, "  --priors <list>              recency, authority, seed, depth, richness")
+	_, _ = fmt.Fprintln(out, "  --prior-strength <0..1>      largest relative score adjustment (default 0.15)")
+	_, _ = fmt.Fprintln(out, "  --recency-half-life <age>    age at which recency halves (default 180d)")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "A query section in the configuration file can supply defaults for mode, fusion,")
+	_, _ = fmt.Fprintln(out, "alpha, top_k, candidate_k, expand and the priors; a flag you pass still wins.")
+	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Indexing defaults to incremental mode; use --rebuild for full rebuild.")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Embedding flags, accepted by index and query:")
@@ -735,47 +806,34 @@ func optionalDepth(value int) *int {
 }
 
 // parseUpdatedSince turns a relative age into the absolute lower bound the SQL
-// comparison needs. Days and weeks are accepted next to Go durations, because
-// "--updated-since 30d" is what an operator reaches for.
+// comparison needs.
 func parseUpdatedSince(value string, now time.Time) (string, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
+	age, err := query.ParseAge(value)
+	if err != nil {
+		return "", fmt.Errorf("query --updated-since %w", err)
+	}
+	if age == 0 {
 		return "", nil
 	}
 
-	if amount, unit, ok := splitAmountUnit(trimmed); ok {
-		switch unit {
-		case "d", "day", "days":
-			return now.AddDate(0, 0, -amount).Format(time.RFC3339), nil
-		case "w", "week", "weeks":
-			return now.AddDate(0, 0, -7*amount).Format(time.RFC3339), nil
-		}
-	}
-
-	duration, err := time.ParseDuration(trimmed)
-	if err != nil {
-		return "", errors.New("query --updated-since must be an age such as 30d, 2w or 12h")
-	}
-
-	return now.Add(-duration).Format(time.RFC3339), nil
+	return now.Add(-age).Format(time.RFC3339), nil
 }
 
-// splitAmountUnit splits a leading integer from a unit suffix ("30d" -> 30 and "d").
-func splitAmountUnit(value string) (int, string, bool) {
-	digits := 0
-	for digits < len(value) && value[digits] >= '0' && value[digits] <= '9' {
-		digits++
+// formatPriorFactors renders prior values in a stable order, so explain output does
+// not depend on map iteration order.
+func formatPriorFactors(factors map[string]float64) string {
+	names := make([]string, 0, len(factors))
+	for name := range factors {
+		names = append(names, name)
 	}
-	if digits == 0 || digits == len(value) {
-		return 0, "", false
+	sort.Strings(names)
+
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s=%.2f", name, factors[name]))
 	}
 
-	amount, err := strconv.Atoi(value[:digits])
-	if err != nil {
-		return 0, "", false
-	}
-
-	return amount, strings.TrimSpace(strings.ToLower(value[digits:])), true
+	return strings.Join(parts, ",")
 }
 
 func summarizeText(s string, max int) string {
@@ -818,6 +876,24 @@ func buildExplainSummary(results []query.Result, req query.Request) []string {
 		lines = append(lines,
 			fmt.Sprintf("top context-range=%d..%d (%d chunks)", best.ContextStartIndex, best.ContextEndIndex, best.ContextChunkCount),
 		)
+	}
+
+	if req.Priors.Enabled() {
+		resolved := req.Priors.Resolved()
+		names := make([]string, 0, len(resolved.Priors))
+		for _, prior := range resolved.Priors {
+			names = append(names, string(prior))
+		}
+		lines = append(lines, fmt.Sprintf(
+			"priors=%s strength=%.2f recency-half-life=%s",
+			strings.Join(names, ","), resolved.Strength, resolved.RecencyHalfLife,
+		))
+		if len(best.MetadataFactors) > 0 {
+			lines = append(lines, "top metadata factors="+formatPriorFactors(best.MetadataFactors))
+		}
+		if best.MetadataBoost != 0 {
+			lines = append(lines, fmt.Sprintf("top metadata boost=+%.4f", best.MetadataBoost))
+		}
 	}
 
 	sorted := append([]query.Result(nil), results...)

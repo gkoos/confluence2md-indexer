@@ -102,7 +102,9 @@ func TestIndexRefreshesMetadataWithoutReembedding(t *testing.T) {
 type queryPayload struct {
 	Count   int `json:"count"`
 	Results []struct {
-		Title string `json:"title"`
+		Title           string             `json:"title"`
+		MetadataBoost   float64            `json:"metadataBoost"`
+		MetadataFactors map[string]float64 `json:"metadataFactors"`
 	} `json:"results"`
 	Request struct {
 		Filters struct {
@@ -304,6 +306,168 @@ func TestParseUpdatedSince(t *testing.T) {
 	}
 
 	if _, err := parseUpdatedSince("whenever", now); err == nil {
+		t.Fatal("expected an error for an unparsable age")
+	}
+}
+
+// indexedFilterCorpus writes the three-page metadata corpus into a temporary database.
+func indexedFilterCorpus(t *testing.T, app *App) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	writeFilterCorpus(t, dir)
+
+	dbPath := filepath.Join(t.TempDir(), "index.db")
+	captureStdout(t, func() {
+		if exit := app.Run([]string{"index", dir, "--db", dbPath, "--json"}); exit != exitCodeOK {
+			t.Fatalf("index exit code: %d", exit)
+		}
+	})
+
+	return dbPath
+}
+
+func TestQueryPriorsReorderResultsAndExplainThemselves(t *testing.T) {
+	app := newTestApp(t)
+	dbPath := indexedFilterCorpus(t, app)
+
+	plain := decodeQueryPayload(t, captureStdout(t, func() {
+		if exit := app.Run([]string{"query", "--db", dbPath, "--q", "shared", "--mode", "lexical", "--json"}); exit != exitCodeOK {
+			t.Fatalf("query exit code: %d", exit)
+		}
+	}))
+	if plain.Results[0].Title != "Page 1" {
+		t.Fatalf("without priors the chunk id breaks the tie, got %q first", plain.Results[0].Title)
+	}
+	if plain.Results[0].MetadataBoost != 0 || plain.Results[0].MetadataFactors != nil {
+		t.Fatalf("prior fields appeared without --priors: %+v", plain.Results[0])
+	}
+
+	// Page 3 is the freshest of the three, page 2 the stalest.
+	boosted := decodeQueryPayload(t, captureStdout(t, func() {
+		args := []string{"query", "--db", dbPath, "--q", "shared", "--mode", "lexical", "--json", "--priors", "recency"}
+		if exit := app.Run(args); exit != exitCodeOK {
+			t.Fatalf("query exit code: %d", exit)
+		}
+	}))
+	if boosted.Results[0].Title != "Page 3" {
+		t.Fatalf("with the recency prior the freshest page must lead, got %q", boosted.Results[0].Title)
+	}
+	if boosted.Results[0].MetadataBoost <= 0 {
+		t.Fatalf("boost = %v, want a positive adjustment", boosted.Results[0].MetadataBoost)
+	}
+	if boosted.Results[0].MetadataFactors["recency"] <= boosted.Results[1].MetadataFactors["recency"] {
+		t.Fatalf("factors = %+v, want the fresher page to score higher", boosted.Results[0].MetadataFactors)
+	}
+
+	explain := captureStdout(t, func() {
+		args := []string{"query", "--db", dbPath, "--q", "shared", "--mode", "lexical", "--explain",
+			"--priors", "recency,seed", "--prior-strength", "0.2", "--recency-half-life", "30d"}
+		if exit := app.Run(args); exit != exitCodeOK {
+			t.Fatalf("explain exit code: %d", exit)
+		}
+	})
+	for _, want := range []string{"priors=recency,seed", "strength=0.20", "recency-half-life=720h0m0s", "metadata factors="} {
+		if !strings.Contains(explain, want) {
+			t.Fatalf("explain output %q, want it to mention %q", explain, want)
+		}
+	}
+}
+
+func TestQueryUsesConfiguredDefaultsAndFlagsStillWin(t *testing.T) {
+	app := newTestApp(t)
+	dbPath := indexedFilterCorpus(t, app)
+	configPath := writeConfigFile(t, `query:
+  mode: "lexical"
+  top_k: 1
+  priors: ["recency"]
+  prior_strength: 0.2
+  recency_half_life: 30d
+`)
+
+	// Nothing passed, so the file decides the mode, the result count and the priors.
+	configured := decodeQueryPayload(t, captureStdout(t, func() {
+		if exit := app.Run([]string{"query", "--db", dbPath, "--config", configPath, "--q", "shared", "--json"}); exit != exitCodeOK {
+			t.Fatalf("query exit code: %d", exit)
+		}
+	}))
+	if configured.Count != 1 {
+		t.Fatalf("count = %d, want the configured top_k of 1", configured.Count)
+	}
+	if configured.Results[0].Title != "Page 3" {
+		t.Fatalf("first result = %q, want the configured recency prior to lead with the freshest page", configured.Results[0].Title)
+	}
+	if configured.Results[0].MetadataBoost <= 0 {
+		t.Fatalf("boost = %v, want the configured prior to apply", configured.Results[0].MetadataBoost)
+	}
+
+	// A flag that is passed wins, and an empty one clears a configured value.
+	overridden := decodeQueryPayload(t, captureStdout(t, func() {
+		args := []string{"query", "--db", dbPath, "--config", configPath, "--q", "shared", "--json", "--top-k", "3", "--priors", ""}
+		if exit := app.Run(args); exit != exitCodeOK {
+			t.Fatalf("query exit code: %d", exit)
+		}
+	}))
+	if overridden.Count != 3 {
+		t.Fatalf("count = %d, want --top-k 3 to beat the configured top_k", overridden.Count)
+	}
+	if overridden.Results[0].MetadataBoost != 0 || overridden.Results[0].MetadataFactors != nil {
+		t.Fatalf("priors applied although the flag cleared them: %+v", overridden.Results[0])
+	}
+}
+
+func TestQueryRejectsInvalidConfiguredDefaults(t *testing.T) {
+	app := newTestApp(t)
+	configPath := writeConfigFile(t, "query:\n  mode: \"semantic\"\n")
+
+	stderr := captureStderr(t, func() {
+		if exit := app.Run([]string{"query", "--q", "x", "--db", "unused.db", "--config", configPath}); exit != exitCodeInvalidUsage {
+			t.Fatalf("exit code = %d, want %d", exit, exitCodeInvalidUsage)
+		}
+	})
+	if !strings.Contains(stderr, "query.mode") {
+		t.Fatalf("stderr = %q, want it to name the rejected key", stderr)
+	}
+}
+
+func TestQueryRejectsInvalidPriors(t *testing.T) {
+	app := newTestApp(t)
+
+	cases := map[string]struct {
+		args []string
+		want string
+	}{
+		"unknown prior":        {[]string{"query", "--q", "x", "--priors", "freshness"}, "available"},
+		"strength above one":   {[]string{"query", "--q", "x", "--priors", "seed", "--prior-strength", "1.5"}, "prior-strength"},
+		"negative strength":    {[]string{"query", "--q", "x", "--priors", "seed", "--prior-strength", "-0.2"}, "prior-strength"},
+		"unparsable half-life": {[]string{"query", "--q", "x", "--priors", "recency", "--recency-half-life", "soon"}, "recency-half-life"},
+		"negative half-life":   {[]string{"query", "--q", "x", "--priors", "recency", "--recency-half-life", "-1h"}, "must not be negative"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			stderr := captureStderr(t, func() {
+				if exit := app.Run(tc.args); exit != exitCodeInvalidUsage {
+					t.Fatalf("exit code = %d, want %d", exit, exitCodeInvalidUsage)
+				}
+			})
+			if !strings.Contains(stderr, tc.want) {
+				t.Fatalf("stderr = %q, want it to mention %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseUpdatedSinceResolvesAges(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+
+	if got, err := parseUpdatedSince("", now); err != nil || got != "" {
+		t.Fatalf("parseUpdatedSince(\"\") = (%q, %v), want no cutoff", got, err)
+	}
+	if got, err := parseUpdatedSince("30d", now); err != nil || got != "2026-08-21T12:00:00Z" {
+		t.Fatalf("parseUpdatedSince(30d) = (%q, %v), want 2026-08-21T12:00:00Z", got, err)
+	}
+	if _, err := parseUpdatedSince("soon", now); err == nil {
 		t.Fatal("expected an error for an unparsable age")
 	}
 }

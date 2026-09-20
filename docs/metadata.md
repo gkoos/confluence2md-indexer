@@ -124,6 +124,45 @@ Both channels are min-max normalised and then combined (weighted `--alpha`, or
 with no similarity at all are dropped, while the weakest *real* match is kept, because
 normalisation maps it to exactly zero.
 
+### Ranking priors
+
+Text relevance and fusion decide the ranking on their own. An optional set of metadata
+priors can nudge that ordering:
+
+```sh
+confluence2md-indexer query --db ./confluence2md-index.db --q "rotate secrets" \
+  --priors recency,authority --prior-strength 0.15 --recency-half-life 180d --explain
+```
+
+| prior | value | meaning |
+| --- | --- | --- |
+| `recency` | `1 / (1 + age / half-life)` over `last_modified_at` | a page touched recently ranks above an equally relevant stale one; `--recency-half-life` (default `180d`) is the age at which the value halves |
+| `authority` | `log1p(link_in) / log1p(10)`, capped at 1 | often-linked pages are hubs |
+| `seed` | `1` for a page in `seed_page_ids`, else `0` | the crawl's entry points |
+| `depth` | `1 / (1 + depth)` | shallower pages sit closer to an entry point |
+| `richness` | `min(1, (attachments + comments) / 5)` | pages with more material attached or discussed |
+
+How they act:
+
+- Off by default: ranking is unchanged until `--priors` names them.
+- The same settings can live in the `query` section of `config.yaml` (`priors`,
+  `prior_strength`, `recency_half_life`); a flag you pass still wins, and
+  `--priors ""` clears a configured list for one query.
+- Applied after fusion and before truncation, as a **multiplicative** adjustment,
+  `score × (1 + strength × mean(prior values))`. The mean keeps adding a prior from
+  inflating the boost, and the multiplication keeps the effect proportional, so a
+  weighted score near 1.0 and an RRF score near 0.03 behave the same way.
+- Bounded by `--prior-strength` (default 0.15, maximum 1), so a prior can reorder
+  near-ties but cannot outrank a clearly better text match.
+- A missing field carries no signal: a page without a timestamp, links or attachments
+  contributes 0 for that prior. Recency decays asymptotically, so a very old page keeps
+  a sliver rather than dropping to nothing.
+- Deterministic: equal scores with equal prior values still fall back to the chunk id,
+  and the same inputs always produce the same order.
+- `--explain` reports the active priors, the resolved strength and half-life, and the
+  factors behind the top result. JSON results carry `metadataBoost` and
+  `metadataFactors` when priors are on, and omit both when they are off.
+
 ## Schema versioning and rebuilds
 
 The schema is versioned through `PRAGMA user_version`, and this build writes version 1.

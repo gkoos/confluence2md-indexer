@@ -57,7 +57,8 @@ This keeps one implementation path for command behavior while preserving stable 
 3. Service opens DB, verifies the schema version and delegates to `query.Run`.
 4. Query pipeline runs the metadata filters as SQL predicates, the lexical channel
    (a sanitised FTS5 expression with weighted BM25) and/or the vector channel, then
-   normalises and fuses the surviving candidates and applies optional expansion.
+   normalises and fuses the surviving candidates, applies the priors the request enabled
+   and adds optional expansion.
 5. CLI renders text output, JSON contract, and optional explain diagnostics.
 
 ## Stats Command Flow
