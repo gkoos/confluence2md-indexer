@@ -3,9 +3,7 @@
 The crawler writes more than page text: every page carries authorship, hierarchy, link
 and attachment information, and the crawl as a whole records when it ran. The indexer
 reads that metadata, stores it, and uses it for filtering and for ranking. This
-document describes what is implemented; the remaining ideas (ranking priors, coverage
-reporting) are still tracked in
-[metadata-search-improvements.md](metadata-search-improvements.md).
+document describes what is implemented.
 
 ## What is read
 

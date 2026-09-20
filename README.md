@@ -371,7 +371,6 @@ Release and CI behavior:
 - [Architecture and data flow](docs/architecture.md)
 - [Operations and troubleshooting](docs/operations.md)
 - [Metadata fields, filters and indexing](docs/metadata.md)
-- [Metadata-driven search improvements](docs/metadata-search-improvements.md) (open work)
 - [Support matrix](docs/support-matrix.md)
 - [MCP integration decision](docs/mcp-integration-decision.md)
 
