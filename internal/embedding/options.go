@@ -13,8 +13,9 @@ const EnvPrefix = "CONFLUENCE2MD_EMBEDDING_"
 
 // Built-in provider identifiers.
 const (
-	ProviderBowLocal = "bow-local"
-	ProviderOpenAI   = "openai"
+	ProviderBowLocal         = "bow-local"
+	ProviderOpenAI           = "openai"
+	ProviderOpenAICompatible = "openai-compatible"
 )
 
 // Resolution sources, reported in command output so users can see which layer

@@ -130,8 +130,14 @@ func newOpenAIWireProvider(opts Options, defaults wireDefaults) (*openAIProvider
 
 	authHeader := firstNonEmpty(opts.AuthHeader, "Authorization")
 	authScheme := "Bearer"
-	if strings.TrimSpace(opts.AuthScheme) != "" {
-		authScheme = strings.TrimSpace(opts.AuthScheme)
+	switch scheme := strings.TrimSpace(opts.AuthScheme); strings.ToLower(scheme) {
+	case "":
+		// Keep the Bearer default.
+	case "none":
+		// Some gateways, notably Azure OpenAI, send the key with no scheme.
+		authScheme = ""
+	default:
+		authScheme = scheme
 	}
 	if apiKey == "" {
 		// Keyless endpoints (local servers) must not receive an auth header.

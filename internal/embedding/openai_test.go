@@ -84,14 +84,23 @@ func fakeVector(text string, dim int) []float32 {
 	return vec
 }
 
-// newWireTestServer starts an embeddings endpoint. handler may write its own
-// response and return true to take over handling from the default success path.
+// newWireTestServer starts an embeddings endpoint at the default path. handler
+// may write its own response and return true to take over handling from the
+// default success path.
 func newWireTestServer(t *testing.T, dim int, handler func(w http.ResponseWriter, r *http.Request, request wireRequest) bool) *httptest.Server {
+	t.Helper()
+	return newWireTestServerAt(t, openAIEmbedPath, dim, handler)
+}
+
+// newWireTestServerAt starts an embeddings endpoint at wantPath, which lets
+// deployment-scoped URLs such as Azure OpenAI's be exercised. An empty wantPath
+// accepts any path.
+func newWireTestServerAt(t *testing.T, wantPath string, dim int, handler func(w http.ResponseWriter, r *http.Request, request wireRequest) bool) *httptest.Server {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != openAIEmbedPath {
-			t.Errorf("unexpected request path %q", r.URL.Path)
+		if wantPath != "" && r.URL.Path != wantPath {
+			t.Errorf("unexpected request path %q, want %q", r.URL.Path, wantPath)
 		}
 
 		var request wireRequest

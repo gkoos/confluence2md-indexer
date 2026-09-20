@@ -27,7 +27,11 @@ func TestStubProviderConformance(t *testing.T) {
 	embeddingtest.Verify(t, embeddingtest.New(32), []string{"one", "two", "three"})
 }
 
-func TestOpenAIProviderConformance(t *testing.T) {
+// conformanceServer serves deterministic, text dependent embeddings so the
+// suite can exercise HTTP adapters without a network dependency.
+func conformanceServer(t *testing.T, dim int) *httptest.Server {
+	t.Helper()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Input []string `json:"input"`
@@ -39,12 +43,17 @@ func TestOpenAIProviderConformance(t *testing.T) {
 
 		data := make([]map[string]any, 0, len(request.Input))
 		for index, text := range request.Input {
-			data = append(data, map[string]any{"embedding": conformanceVector(text, 8), "index": index})
+			data = append(data, map[string]any{"embedding": conformanceVector(text, dim), "index": index})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
+	return server
+}
+
+func TestOpenAIProviderConformance(t *testing.T) {
+	server := conformanceServer(t, 8)
 	t.Setenv("OPENAI_API_KEY", "token")
 
 	resolution, err := embedding.Resolve(embedding.Options{
@@ -52,6 +61,22 @@ func TestOpenAIProviderConformance(t *testing.T) {
 		BaseURL:   server.URL,
 		Dimension: 8,
 		APIKeyEnv: "OPENAI_API_KEY",
+	})
+	if err != nil {
+		t.Fatalf("resolve provider: %v", err)
+	}
+
+	embeddingtest.Verify(t, resolution.Provider, []string{"alpha beta", "gamma delta", "epsilon zeta"})
+}
+
+func TestOpenAICompatibleProviderConformance(t *testing.T) {
+	server := conformanceServer(t, 8)
+
+	resolution, err := embedding.Resolve(embedding.Options{
+		Provider:  embedding.ProviderOpenAICompatible,
+		BaseURL:   server.URL,
+		Model:     "conformance-model",
+		Dimension: 8,
 	})
 	if err != nil {
 		t.Fatalf("resolve provider: %v", err)

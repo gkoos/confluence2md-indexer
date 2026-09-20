@@ -209,7 +209,7 @@ func registerEmbeddingFlags(fs *flag.FlagSet, values *embeddingFlags) {
 	fs.IntVar(&values.dimension, "embedding-dim", 0, "Vector dimension when the model is not known locally")
 	fs.StringVar(&values.apiKeyEnv, "embedding-api-key-env", "", "Name of the environment variable holding the API key")
 	fs.StringVar(&values.authHeader, "embedding-auth-header", "", "Authentication header name (default Authorization)")
-	fs.StringVar(&values.authScheme, "embedding-auth-scheme", "", "Authentication scheme prefix (default Bearer)")
+	fs.StringVar(&values.authScheme, "embedding-auth-scheme", "", "Authentication scheme prefix (default Bearer; use \"none\" for a raw key)")
 	fs.Var(&values.headers, "embedding-header", "Extra request header in key=value form; repeatable")
 	fs.Var(&values.queryParams, "embedding-query-param", "Extra query parameter in key=value form; repeatable")
 	fs.StringVar(&values.docPrefix, "embedding-document-prefix", "", "Text prefix applied to indexed text")
