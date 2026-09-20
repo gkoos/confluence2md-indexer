@@ -123,18 +123,21 @@ func newOpenAIWireProvider(opts Options, defaults wireDefaults) (*openAIProvider
 	}
 
 	apiKeyEnv := firstNonEmpty(opts.APIKeyEnv, defaults.defaultKeyEnv)
-	apiKey := ""
-	if apiKeyEnv != "" {
+	// A literal key is the most explicit way to supply one, so it wins; naming a
+	// variable stays preferred, because a literal value ends up stored in whichever
+	// file carried it.
+	apiKey := strings.TrimSpace(opts.APIKey)
+	if apiKey == "" && apiKeyEnv != "" {
 		apiKey = strings.TrimSpace(os.Getenv(apiKeyEnv))
 		if apiKey == "" {
 			return nil, fmt.Errorf(
-				"%s requires an API key in %s (set it, or name another variable with --embedding-api-key-env)",
+				"%s requires an API key in %s (set it, name another variable with --embedding-api-key-env, or set embedding.api_key)",
 				defaults.id, apiKeyEnv,
 			)
 		}
 	}
 	if apiKey == "" && defaults.requireKey {
-		return nil, fmt.Errorf("%s requires an API key", defaults.id)
+		return nil, fmt.Errorf("%s requires an API key (set %s, or embedding.api_key)", defaults.id, apiKeyEnv)
 	}
 
 	authHeader := firstNonEmpty(opts.AuthHeader, "Authorization")

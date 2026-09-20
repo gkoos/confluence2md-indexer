@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gkoos/confluence2md-indexer/internal/config"
 	"github.com/gkoos/confluence2md-indexer/internal/query"
 )
 
@@ -24,7 +25,7 @@ func TestRunIndexPreflightOK(t *testing.T) {
 		t.Fatalf("write markdown: %v", err)
 	}
 
-	app := NewApp()
+	app := newTestApp(t)
 	exit := app.Run([]string{"index", dir})
 	if exit != exitCodeOK {
 		t.Fatalf("expected exit %d got %d", exitCodeOK, exit)
@@ -45,7 +46,7 @@ func TestRunIndexPreflightOKWithFolderBeforeFlags(t *testing.T) {
 		t.Fatalf("write markdown: %v", err)
 	}
 
-	app := NewApp()
+	app := newTestApp(t)
 	exit := app.Run([]string{"index", dir, "--rebuild", "--json"})
 	if exit != exitCodeOK {
 		t.Fatalf("expected exit %d got %d", exitCodeOK, exit)
@@ -53,7 +54,7 @@ func TestRunIndexPreflightOKWithFolderBeforeFlags(t *testing.T) {
 }
 
 func TestRunIndexPreflightFail(t *testing.T) {
-	app := NewApp()
+	app := newTestApp(t)
 	exit := app.Run([]string{"index", t.TempDir()})
 	if exit != exitCodeInvalidUsage {
 		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
@@ -61,7 +62,7 @@ func TestRunIndexPreflightFail(t *testing.T) {
 }
 
 func TestRunQueryValidationFail(t *testing.T) {
-	app := NewApp()
+	app := newTestApp(t)
 	exit := app.Run([]string{"query", "--q", "abc", "--alpha", "2"})
 	if exit != exitCodeInvalidUsage {
 		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
@@ -88,7 +89,7 @@ func TestRunQueryJSONSuccess(t *testing.T) {
 		t.Fatalf("write markdown: %v", err)
 	}
 
-	app := NewApp()
+	app := newTestApp(t)
 	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
 		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
 	}
@@ -131,7 +132,7 @@ func TestRunQueryPaginationJSON(t *testing.T) {
 		t.Fatalf("write markdown: %v", err)
 	}
 
-	app := NewApp()
+	app := newTestApp(t)
 	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
 		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
 	}
@@ -182,7 +183,7 @@ func TestRunQueryExplainSuccess(t *testing.T) {
 		t.Fatalf("write markdown: %v", err)
 	}
 
-	app := NewApp()
+	app := newTestApp(t)
 	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
 		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
 	}
@@ -222,7 +223,7 @@ func TestRunQueryExpandShowsContextRange(t *testing.T) {
 		t.Fatalf("write markdown: %v", err)
 	}
 
-	app := NewApp()
+	app := newTestApp(t)
 	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
 		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
 	}
@@ -333,7 +334,7 @@ func writeIndexFixture(t *testing.T, markdown string) string {
 func TestIndexEmbeddingFlagsReachProvider(t *testing.T) {
 	dir := writeIndexFixture(t, "# heading\n\nbanana text")
 
-	app := NewApp()
+	app := newTestApp(t)
 	output := captureStdout(t, func() {
 		// Flags placed after the positional folder must still parse.
 		if exit := app.Run([]string{"index", dir, "--embedding-dim", "64", "--json"}); exit != exitCodeOK {
@@ -353,7 +354,7 @@ func TestIndexEmbeddingFlagsOverrideEnvironment(t *testing.T) {
 	t.Setenv("CONFLUENCE2MD_EMBEDDING_DIM", "64")
 	dir := writeIndexFixture(t, "# heading\n\nbanana text")
 
-	app := NewApp()
+	app := newTestApp(t)
 	output := captureStdout(t, func() {
 		if exit := app.Run([]string{"index", dir, "--embedding-dim", "128", "--json"}); exit != exitCodeOK {
 			t.Fatalf("expected exit %d got %d", exitCodeOK, exit)
@@ -368,7 +369,7 @@ func TestIndexEmbeddingFlagsOverrideEnvironment(t *testing.T) {
 func TestIndexReportsExplicitProviderSource(t *testing.T) {
 	dir := writeIndexFixture(t, "# heading\n\nbanana text")
 
-	app := NewApp()
+	app := newTestApp(t)
 	output := captureStdout(t, func() {
 		if exit := app.Run([]string{"index", dir, "--embedding", "bow-local", "--json"}); exit != exitCodeOK {
 			t.Fatalf("expected exit %d got %d", exitCodeOK, exit)
@@ -381,7 +382,7 @@ func TestIndexReportsExplicitProviderSource(t *testing.T) {
 }
 
 func TestEmbeddingListEnumeratesProviders(t *testing.T) {
-	app := NewApp()
+	app := newTestApp(t)
 
 	for _, args := range [][]string{
 		{"index", "--embedding", "list"},
@@ -399,7 +400,7 @@ func TestEmbeddingListEnumeratesProviders(t *testing.T) {
 }
 
 func TestEmbeddingFlagValidation(t *testing.T) {
-	app := NewApp()
+	app := newTestApp(t)
 	dbPath := filepath.Join(t.TempDir(), "index.db")
 
 	cases := [][]string{
@@ -417,7 +418,7 @@ func TestEmbeddingFlagValidation(t *testing.T) {
 }
 
 func TestUnknownEmbeddingProviderIsActionable(t *testing.T) {
-	app := NewApp()
+	app := newTestApp(t)
 	dbPath := filepath.Join(t.TempDir(), "index.db")
 
 	stderr := captureStderr(t, func() {
@@ -434,7 +435,7 @@ func TestUnknownEmbeddingProviderIsActionable(t *testing.T) {
 
 func TestIndexSkipEmbeddingsLeavesNoVectorChannel(t *testing.T) {
 	dir := writeIndexFixture(t, "# heading\n\nbanana text")
-	app := NewApp()
+	app := newTestApp(t)
 
 	output := captureStdout(t, func() {
 		if exit := app.Run([]string{"index", dir, "--skip-embeddings", "--json"}); exit != exitCodeOK {
@@ -463,7 +464,7 @@ func TestIndexSkipEmbeddingsLeavesNoVectorChannel(t *testing.T) {
 func TestQueryLexicalOnlyNeedsNoProvider(t *testing.T) {
 	dir := writeIndexFixture(t, "# heading\n\nbanana text")
 	dbPath := filepath.Join(dir, defaultDBFileName)
-	app := NewApp()
+	app := newTestApp(t)
 
 	captureStdout(t, func() {
 		if exit := app.Run([]string{"index", dir, "--skip-embeddings"}); exit != exitCodeOK {
@@ -491,4 +492,20 @@ func TestQueryLexicalOnlyNeedsNoProvider(t *testing.T) {
 	if !strings.Contains(stderr, "--lexical-only conflicts with --mode vector") {
 		t.Fatalf("expected a conflict explanation, got %q", stderr)
 	}
+}
+
+// newTestApp returns an app whose commands read an empty configuration file, so a
+// developer's own config.yaml cannot change what these tests observe.
+// CONFLUENCE2MD_CONFIG takes precedence over the default file name in the working
+// directory, which keeps every assertion independent of where the tests run.
+func newTestApp(t *testing.T) *App {
+	t.Helper()
+
+	configPath := filepath.Join(t.TempDir(), "empty-config.yaml")
+	if err := os.WriteFile(configPath, []byte("# deliberately empty\n"), 0644); err != nil {
+		t.Fatalf("write empty config: %v", err)
+	}
+	t.Setenv(config.EnvFileName, configPath)
+
+	return NewApp()
 }

@@ -66,6 +66,14 @@ func run(verbose bool) error {
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
+	// Run from the fixture directory: a config.yaml in the caller's working
+	// directory must not be able to redirect the gate.
+	leave, err := chdir(dir)
+	if err != nil {
+		return err
+	}
+	defer leave()
+
 	if err := writeFixture(dir); err != nil {
 		return err
 	}
@@ -122,6 +130,19 @@ func run(verbose bool) error {
 
 // clearEmbeddingEnv removes embedding configuration so the default provider is
 // the one under test.
+// chdir enters dir and returns a function that restores the previous working
+// directory.
+func chdir(dir string) (func(), error) {
+	previous, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve working directory: %w", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		return nil, fmt.Errorf("enter %s: %w", dir, err)
+	}
+	return func() { _ = os.Chdir(previous) }, nil
+}
+
 func clearEmbeddingEnv() {
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")

@@ -23,6 +23,7 @@ const (
 const (
 	SourceFlag    = "flag"
 	SourceEnv     = "env"
+	SourceConfig  = "config"
 	SourceDefault = "default"
 )
 
@@ -35,18 +36,27 @@ const (
 	DefaultMaxRetries = 3
 )
 
-// Options carries embedding configuration from flags, environment and defaults.
+// Options carries embedding configuration from flags, the configuration file,
+// the environment and built-in defaults.
 //
-// Flag-provided values take precedence over environment variables, which take
-// precedence over built-in defaults. Secrets are never passed in Options
-// directly: APIKeyEnv names the environment variable that holds the key.
+// Precedence, highest first: a flag that was passed, an environment variable
+// that is set, a configuration key that is present, then built-in defaults. Merge
+// implements that order; Resolve applies environment and defaults to options that
+// a caller built by hand.
+//
+// Secrets need not appear here: APIKeyEnv names the environment variable that
+// holds the key, while APIKey holds a literal value that only a configuration
+// file should supply.
 type Options struct {
-	Provider    string
-	Model       string
-	BaseURL     string
-	Path        string
-	Dimension   int
-	APIKeyEnv   string
+	Provider  string
+	Model     string
+	BaseURL   string
+	Path      string
+	Dimension int
+	APIKeyEnv string
+	// APIKey is a literal credential. Naming a variable through APIKeyEnv is
+	// preferred, because a value here ends up in whichever file supplied it.
+	APIKey      string
 	AuthHeader  string
 	AuthScheme  string
 	Headers     []string
@@ -60,6 +70,69 @@ type Options struct {
 	MaxRetries int
 	// Skip disables the vector channel entirely when true.
 	Skip bool
+	// Source records which configuration layer supplied the provider id. It is
+	// informational and surfaces as embedding.source in command output.
+	Source string
+}
+
+// Present records which fields a configuration layer actually supplied, so that
+// layers merge exactly: a value that is present but empty is still a decision,
+// while an omitted value is not.
+type Present struct {
+	Provider    bool
+	Model       bool
+	BaseURL     bool
+	Path        bool
+	Dimension   bool
+	APIKeyEnv   bool
+	APIKey      bool
+	AuthHeader  bool
+	AuthScheme  bool
+	Headers     bool
+	QueryParams bool
+	DocPrefix   bool
+	QueryPrefix bool
+	BatchSize   bool
+	Timeout     bool
+	MaxRetries  bool
+	Skip        bool
+}
+
+// ReadEnv returns environment configuration together with the fields that
+// supplied a value, so callers can merge it as a configuration layer.
+//
+// An environment variable that is unset or empty counts as absent, which keeps
+// the previous behaviour of this package. To clear a value that a configuration
+// file sets, pass the matching flag with an empty value instead.
+func ReadEnv() (Options, Present, error) {
+	env, present, err := readEnvOptions()
+	if err != nil {
+		return Options{}, Present{}, err
+	}
+	return env.options(), present, nil
+}
+
+// options converts environment values into Options.
+func (env envOptions) options() Options {
+	return Options{
+		Provider:    env.provider,
+		Model:       env.model,
+		BaseURL:     env.baseURL,
+		Path:        env.path,
+		Dimension:   env.dimension,
+		APIKeyEnv:   env.apiKeyEnv,
+		APIKey:      env.apiKey,
+		AuthHeader:  env.authHeader,
+		AuthScheme:  env.authScheme,
+		Headers:     env.headers,
+		QueryParams: env.queryParams,
+		DocPrefix:   env.docPrefix,
+		QueryPrefix: env.queryPrefix,
+		BatchSize:   env.batchSize,
+		Timeout:     env.timeout,
+		MaxRetries:  env.maxRetries,
+		Skip:        env.skip,
+	}
 }
 
 // envOptions holds values read from the environment.
@@ -70,6 +143,7 @@ type envOptions struct {
 	path        string
 	dimension   int
 	apiKeyEnv   string
+	apiKey      string
 	authHeader  string
 	authScheme  string
 	headers     []string
@@ -85,7 +159,7 @@ type envOptions struct {
 // withDefaults fills unset fields from the environment and then from built-in
 // defaults. It reports whether the provider id came from the environment.
 func (opts Options) withDefaults() (Options, bool, error) {
-	env, err := readEnvOptions()
+	env, _, err := readEnvOptions()
 	if err != nil {
 		return opts, false, err
 	}
@@ -146,51 +220,104 @@ func (opts Options) withDefaults() (Options, bool, error) {
 	return opts, providerFromEnv, nil
 }
 
-// readEnvOptions parses CONFLUENCE2MD_EMBEDDING_* variables. Malformed numeric
-// or duration values are reported instead of silently ignored, because a typo
-// in DIM would otherwise index a corpus with an unexpected vector size.
-func readEnvOptions() (envOptions, error) {
+// readEnvOptions parses CONFLUENCE2MD_EMBEDDING_* variables and reports which of
+// them supplied a value, so the environment can be merged as a configuration
+// layer. Malformed numeric or duration values are reported instead of silently
+// ignored, because a typo in DIM would otherwise index a corpus with an
+// unexpected vector size.
+func readEnvOptions() (envOptions, Present, error) {
 	var env envOptions
+	var present Present
 
-	env.provider = envString("PROVIDER")
-	env.model = envString("MODEL")
-	env.baseURL = envString("BASE_URL")
-	env.path = envString("PATH")
-	env.apiKeyEnv = envString("API_KEY_ENV")
-	env.authHeader = envString("AUTH_HEADER")
-	env.authScheme = envString("AUTH_SCHEME")
-	env.docPrefix = os.Getenv(EnvPrefix + "DOCUMENT_PREFIX")
-	env.queryPrefix = os.Getenv(EnvPrefix + "QUERY_PREFIX")
-	env.headers = envList("HEADERS")
-	env.queryParams = envList("QUERY_PARAMS")
-
-	dimension, err := envInt("DIM")
-	if err != nil {
-		return env, err
+	if value := envString("PROVIDER"); value != "" {
+		env.provider = value
+		present.Provider = true
 	}
-	env.dimension = dimension
-
-	batchSize, err := envInt("BATCH_SIZE")
-	if err != nil {
-		return env, err
+	if value := envString("MODEL"); value != "" {
+		env.model = value
+		present.Model = true
 	}
-	env.batchSize = batchSize
-
-	maxRetries, err := envInt("MAX_RETRIES")
-	if err != nil {
-		return env, err
+	if value := envString("BASE_URL"); value != "" {
+		env.baseURL = value
+		present.BaseURL = true
 	}
-	env.maxRetries = maxRetries
-
-	timeout, err := envDuration("TIMEOUT")
-	if err != nil {
-		return env, err
+	if value := envString("PATH"); value != "" {
+		env.path = value
+		present.Path = true
 	}
-	env.timeout = timeout
+	if value := envString("API_KEY_ENV"); value != "" {
+		env.apiKeyEnv = value
+		present.APIKeyEnv = true
+	}
+	if value := envString("API_KEY"); value != "" {
+		env.apiKey = value
+		present.APIKey = true
+	}
+	if value := envString("AUTH_HEADER"); value != "" {
+		env.authHeader = value
+		present.AuthHeader = true
+	}
+	if value := envString("AUTH_SCHEME"); value != "" {
+		env.authScheme = value
+		present.AuthScheme = true
+	}
+	// Prefixes keep their exact whitespace: models such as E5 and nomic expect
+	// trailing spaces before the text.
+	if value := os.Getenv(EnvPrefix + "DOCUMENT_PREFIX"); value != "" {
+		env.docPrefix = value
+		present.DocPrefix = true
+	}
+	if value := os.Getenv(EnvPrefix + "QUERY_PREFIX"); value != "" {
+		env.queryPrefix = value
+		present.QueryPrefix = true
+	}
+	if envString("HEADERS") != "" {
+		env.headers = envList("HEADERS")
+		present.Headers = true
+	}
+	if envString("QUERY_PARAMS") != "" {
+		env.queryParams = envList("QUERY_PARAMS")
+		present.QueryParams = true
+	}
 
-	env.skip = envBool("SKIP")
+	if envString("DIM") != "" {
+		dimension, err := envInt("DIM")
+		if err != nil {
+			return env, present, err
+		}
+		env.dimension = dimension
+		present.Dimension = true
+	}
+	if envString("BATCH_SIZE") != "" {
+		batchSize, err := envInt("BATCH_SIZE")
+		if err != nil {
+			return env, present, err
+		}
+		env.batchSize = batchSize
+		present.BatchSize = true
+	}
+	if envString("MAX_RETRIES") != "" {
+		maxRetries, err := envInt("MAX_RETRIES")
+		if err != nil {
+			return env, present, err
+		}
+		env.maxRetries = maxRetries
+		present.MaxRetries = true
+	}
+	if envString("TIMEOUT") != "" {
+		timeout, err := envDuration("TIMEOUT")
+		if err != nil {
+			return env, present, err
+		}
+		env.timeout = timeout
+		present.Timeout = true
+	}
+	if envString("SKIP") != "" {
+		env.skip = envBool("SKIP")
+		present.Skip = true
+	}
 
-	return env, nil
+	return env, present, nil
 }
 
 func firstNonEmpty(values ...string) string {
