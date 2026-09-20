@@ -11,6 +11,12 @@ import (
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
 )
 
+// Modes lists the retrieval modes a request may select, in documentation order.
+var Modes = []string{"hybrid", "lexical", "vector"}
+
+// Fusions lists the fusion strategies a request may select.
+var Fusions = []string{"weighted", "rrf"}
+
 type Request struct {
 	Text       string
 	Mode       string
@@ -26,6 +32,9 @@ type Request struct {
 	// Embedding configures provider resolution for this query. It is not part of
 	// the request contract: the command or API layer fills it in.
 	Embedding embedding.Options `json:"-"`
+	// Priors are the metadata ranking signals to apply. They are empty by default,
+	// which leaves ranking exactly as text relevance and fusion produced it.
+	Priors PriorConfig `json:"-"`
 }
 
 type Result struct {
@@ -47,6 +56,12 @@ type Result struct {
 	Vector            float64 `json:"vectorScore"`
 	Fused             float64 `json:"fusedScore"`
 	Fusion            string  `json:"fusion"`
+	// MetadataBoost is the adjustment the enabled priors applied, in the same units
+	// as the fused score. It is omitted when no prior is enabled.
+	MetadataBoost float64 `json:"metadataBoost,omitempty"`
+	// MetadataFactors holds the normalised value of every enabled prior for this
+	// result, which makes the adjustment explainable.
+	MetadataFactors map[string]float64 `json:"metadataFactors,omitempty"`
 }
 
 func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req Request) ([]Result, int, error) {
@@ -78,6 +93,10 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	}
 	if req.RRFK <= 0 {
 		req.RRFK = 60
+	}
+	if req.Priors.Enabled() {
+		// Resolve once, so every result and the explain output see the same defaults.
+		req.Priors = req.Priors.Resolved()
 	}
 	req.Filters.Candidate = req.CandidateK
 
@@ -165,14 +184,25 @@ func applyExpansion(ctx context.Context, database *sql.DB, results []Result, exp
 }
 
 func fuse(req Request, lexical, vector []db.Candidate) []Result {
+	// A channel only speaks when it scored something: both BM25 (negated, so higher
+	// is better) and cosine similarity treat zero as "no signal". Filtering here,
+	// on the raw score, keeps the weakest real match, which min-max normalisation
+	// maps to exactly zero and the previous version then dropped.
+	lexical = withSignal(lexical, func(c db.Candidate) float64 { return c.LexicalScoreRaw })
+	vector = withSignal(vector, func(c db.Candidate) float64 { return c.VectorScoreRaw })
+
 	lexNorm := normalizeScores(lexical, func(c db.Candidate) float64 { return c.LexicalScoreRaw })
 	vecNorm := normalizeScores(vector, func(c db.Candidate) float64 { return c.VectorScoreRaw })
 
 	combined := map[string]*Result{}
+	// candidates remembers the row behind every result, so priors can read the
+	// metadata long after the channel lists have been consumed.
+	candidates := map[string]db.Candidate{}
 	merge := func(c db.Candidate) *Result {
 		if existing, ok := combined[c.ChunkID]; ok {
 			return existing
 		}
+		candidates[c.ChunkID] = c
 		r := &Result{
 			ChunkID:    c.ChunkID,
 			DocumentID: c.DocumentID,
@@ -216,11 +246,14 @@ func fuse(req Request, lexical, vector []db.Candidate) []Result {
 		}
 	}
 
+	// Priors run after fusion and before truncation, so they can reorder the
+	// candidates that fusion produced but never invent relevance of their own.
+	if req.Priors.Enabled() {
+		applyPriors(req.Priors, combined, candidates)
+	}
+
 	out := make([]Result, 0, len(combined))
 	for _, r := range combined {
-		if r.Fused <= 0 {
-			continue
-		}
 		out = append(out, *r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -247,6 +280,49 @@ func rrf(req Request, lexical, vector []db.Candidate, combined map[string]*Resul
 		r.Fused = score
 		r.Fusion = "rrf"
 	}
+}
+
+// applyPriors folds the metadata signals into every fused score.
+//
+// The adjustment is multiplicative and bounded by the configured strength, which
+// keeps it meaningful for both fusion modes: a weighted score near 1.0 and an RRF
+// score near 0.03 scale the same way, and a prior can never outrank a clearly better
+// text match. The mean of the enabled prior values is used, so enabling another prior
+// does not inflate the boost.
+func applyPriors(config PriorConfig, combined map[string]*Result, candidates map[string]db.Candidate) {
+	resolved := config.Resolved()
+
+	for chunkID, result := range combined {
+		candidate, ok := candidates[chunkID]
+		if !ok {
+			continue
+		}
+
+		factors := resolved.Values(candidate)
+		total := 0.0
+		for _, value := range factors {
+			total += value
+		}
+		mean := total / float64(len(factors))
+
+		boost := result.Fused * resolved.Strength * mean
+		result.Fused += boost
+		result.MetadataBoost = boost
+		result.MetadataFactors = factors
+	}
+}
+
+// withSignal keeps the candidates a channel actually scored, dropping the rows it
+// returned with no similarity at all.
+func withSignal(candidates []db.Candidate, selector func(db.Candidate) float64) []db.Candidate {
+	kept := make([]db.Candidate, 0, len(candidates))
+	for _, c := range candidates {
+		if selector(c) > 0 {
+			kept = append(kept, c)
+		}
+	}
+
+	return kept
 }
 
 func rankMap(candidates []db.Candidate) map[string]int {

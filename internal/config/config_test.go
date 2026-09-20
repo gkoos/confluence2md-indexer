@@ -317,3 +317,111 @@ func TestLoadRejectsBrokenYAML(t *testing.T) {
 		t.Fatalf("error = %v, want it to point at the YAML syntax", err)
 	}
 }
+func TestLoadReadsQueryDefaults(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `query:
+  mode: "lexical"
+  fusion: "rrf"
+  alpha: 0.4
+  top_k: 5
+  candidate_k: 20
+  expand: 2
+  priors: ["recency", "seed"]
+  prior_strength: 0.3
+  recency_half_life: 90d
+`))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	q := cfg.File.Query
+	if q == nil {
+		t.Fatal("the query section must be present")
+	}
+	if q.Mode == nil || *q.Mode != "lexical" || q.Fusion == nil || *q.Fusion != "rrf" {
+		t.Fatalf("mode/fusion = %+v, want the file values", q)
+	}
+	if q.Alpha == nil || *q.Alpha != 0.4 {
+		t.Fatalf("alpha = %v, want 0.4", q.Alpha)
+	}
+	if q.TopK == nil || *q.TopK != 5 || q.CandidateK == nil || *q.CandidateK != 20 || q.Expand == nil || *q.Expand != 2 {
+		t.Fatalf("counts = %+v, want the file values", q)
+	}
+	if len(q.Priors) != 2 || q.Priors[0] != "recency" || q.Priors[1] != "seed" {
+		t.Fatalf("priors = %v, want the file list", q.Priors)
+	}
+	if q.PriorStrength == nil || *q.PriorStrength != 0.3 {
+		t.Fatalf("prior strength = %v, want 0.3", q.PriorStrength)
+	}
+	if q.RecencyHalfLife == nil || *q.RecencyHalfLife != "90d" {
+		t.Fatalf("recency half-life = %v, want the age text 90d", q.RecencyHalfLife)
+	}
+}
+
+func TestLoadLeavesAbsentQueryKeysUnset(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "query:\n  mode: \"hybrid\"\n"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	q := cfg.File.Query
+	if q == nil || q.Mode == nil {
+		t.Fatalf("query = %+v, want the mode the file sets", q)
+	}
+	if q.Fusion != nil || q.Alpha != nil || q.TopK != nil || q.CandidateK != nil || q.Expand != nil {
+		t.Fatalf("query = %+v, want absent keys to stay nil", q)
+	}
+	if q.Priors != nil || q.PriorStrength != nil || q.RecencyHalfLife != nil {
+		t.Fatalf("query = %+v, want absent prior keys to stay nil", q)
+	}
+
+	withoutSection, err := Load(writeConfig(t, "db:\n  path: \"\"\n"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if withoutSection.File.Query != nil {
+		t.Fatalf("query = %+v, want nil without a query section", withoutSection.File.Query)
+	}
+}
+
+func TestLoadReadsEmptyPriorListAsOff(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "query:\n  priors: []\n"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.File.Query == nil || cfg.File.Query.Priors == nil {
+		t.Fatal("an empty list is present, not absent, so it clears a configured default")
+	}
+	if len(cfg.File.Query.Priors) != 0 {
+		t.Fatalf("priors = %v, want an empty list", cfg.File.Query.Priors)
+	}
+}
+
+func TestLoadRejectsInvalidQueryDefaults(t *testing.T) {
+	cases := map[string]struct {
+		content string
+		want    string
+	}{
+		"unknown mode":         {"query:\n  mode: \"semantic\"\n", "query.mode"},
+		"unknown fusion":       {"query:\n  fusion: \"borda\"\n", "query.fusion"},
+		"alpha above one":      {"query:\n  alpha: 1.5\n", "query.alpha"},
+		"top k of zero":        {"query:\n  top_k: 0\n", "query.top_k"},
+		"negative candidate k": {"query:\n  candidate_k: -5\n", "query.candidate_k"},
+		"negative expand":      {"query:\n  expand: -1\n", "query.expand"},
+		"unknown prior":        {"query:\n  priors: [\"freshness\"]\n", "query.priors"},
+		"strength above one":   {"query:\n  prior_strength: 2\n", "query.prior_strength"},
+		"negative half-life":   {"query:\n  recency_half_life: -1h\n", "query.recency_half_life"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.content))
+			if err == nil {
+				t.Fatalf("expected an error mentioning %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), "invalid config file") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want an invalid-config message naming %q", err, tc.want)
+			}
+		})
+	}
+}

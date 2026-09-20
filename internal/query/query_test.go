@@ -156,6 +156,53 @@ func TestFuseLexicalFiltersZeroScoreTail(t *testing.T) {
 	}
 }
 
+func TestFuseKeepsTheWeakestRealCandidate(t *testing.T) {
+	// Min-max normalisation maps the weakest of several positive scores to exactly
+	// zero, and the "no signal" filter used to drop it, which silently removed the
+	// last real match of every query.
+	results := fuse(Request{Mode: "lexical"}, []db.Candidate{
+		{ChunkID: "c-strong", LexicalScoreRaw: 10},
+		{ChunkID: "c-middle", LexicalScoreRaw: 4},
+		{ChunkID: "c-weak", LexicalScoreRaw: 1},
+	}, nil)
+
+	if len(results) != 3 {
+		t.Fatalf("expected three lexical results, got %d", len(results))
+	}
+	if results[len(results)-1].ChunkID != "c-weak" {
+		t.Fatalf("expected the weakest match to rank last, got %s", results[len(results)-1].ChunkID)
+	}
+}
+
+func TestFuseDropsCandidatesWithoutSimilarity(t *testing.T) {
+	results := fuse(Request{Mode: "vector"}, nil, []db.Candidate{
+		{ChunkID: "c-keep", VectorScoreRaw: 0.4},
+		{ChunkID: "c-zero", VectorScoreRaw: 0},
+		{ChunkID: "c-negative", VectorScoreRaw: -0.2},
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("expected one scored vector result, got %d", len(results))
+	}
+	if results[0].ChunkID != "c-keep" {
+		t.Fatalf("expected c-keep to remain, got %s", results[0].ChunkID)
+	}
+}
+
+func TestFuseKeepsBothChannelsInHybridMode(t *testing.T) {
+	results := fuse(Request{Mode: "hybrid", Fusion: "weighted", Alpha: 0.5},
+		[]db.Candidate{{ChunkID: "c-lex", LexicalScoreRaw: 8}},
+		[]db.Candidate{
+			{ChunkID: "c-vec", VectorScoreRaw: 0.9},
+			{ChunkID: "c-vec-weak", VectorScoreRaw: 0.1},
+		},
+	)
+
+	if len(results) != 3 {
+		t.Fatalf("expected three hybrid results, got %d", len(results))
+	}
+}
+
 func TestRunRejectsEmbeddingIdentityMismatch(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
