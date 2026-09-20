@@ -24,6 +24,8 @@ Authenticates to Confluence via the REST API, fetches pages and attachments, con
 
 Reads the Markdown output directory, chunks each page, computes vector embeddings, builds FTS tables, and stores everything in a single local SQLite file. Supports lexical (BM25), vector (cosine), and hybrid retrieval. Can also be used as a Go library via its public `Query` API.
 
+Embedding providers are pluggable: an offline bag-of-words provider (the default, and the reason the tool works with no network or API key), OpenAI, and any endpoint speaking the OpenAI embeddings protocol, including Azure OpenAI, Ollama, LM Studio, vLLM and hosted APIs such as SiliconFlow. The provider identity is stored with every vector, so a query that does not match the index is reported as an error instead of silently returning nothing. See [embedding-providers.md](embedding-providers.md).
+
 ### 3. Serve — `confluence2md-mcp`
 
 Wraps `confluence2md-indexer` as a stdio MCP server. Receives search queries from any MCP-compatible AI client (VS Code Copilot, Claude Code, OpenAI Codex, etc.), queries the SQLite index with hybrid retrieval, and returns ranked results with score metadata.

@@ -9,6 +9,54 @@ For field-by-field output details, see [output-reference.md](output-reference.md
 - You already ran indexing at least once.
 - You know the DB path (default when indexing folder `./output` is `./output/confluence2md-index.db`).
 
+## Embedding Providers (Index and Query Must Match)
+
+Indexing records which embedding provider produced each vector, and querying checks the configured provider against that record. Both commands must therefore be given the same embedding settings. See [embedding-providers.md](embedding-providers.md).
+
+Offline default, requiring no configuration:
+
+```sh
+confluence2md-indexer index ./output
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "rotate secrets"
+```
+
+A larger offline vector, which queries must then match:
+
+```sh
+confluence2md-indexer index ./output --embedding-dim 512
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "rotate secrets" --embedding-dim 512
+```
+
+OpenAI:
+
+```sh
+confluence2md-indexer index ./output --embedding openai
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "rotate secrets" --embedding openai
+```
+
+A local OpenAI-compatible server:
+
+```sh
+confluence2md-indexer index ./output \
+  --embedding openai-compatible \
+  --embedding-base-url http://127.0.0.1:11434/v1 \
+  --embedding-model bge-m3 \
+  --embedding-dim 1024
+```
+
+Term matching only, needing no provider at all:
+
+```sh
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "rotate secrets" --lexical-only
+```
+
+A mismatch is reported instead of silently returning nothing:
+
+```text
+query: embedding mismatch: index vectors are "bow-local:fnv1a@256" but the configured provider
+is "bow-local:fnv1a@512"; re-index with --rebuild, select the stored provider, or query with --mode lexical
+```
+
 ## Basic Query
 
 Run hybrid retrieval with defaults:
@@ -175,3 +223,7 @@ The payload includes:
 - Invalid fusion: `query --fusion must be one of: weighted, rrf`
 - Invalid date format: `query --from must be YYYY-MM-DD` (same for `--to`)
 - Invalid date range: `query date range invalid: --from must be <= --to`
+- Conflicting mode: `query --lexical-only conflicts with --mode vector`
+- Unknown provider: `unknown embedding provider "..." (available: bow-local, openai, openai-compatible)`
+- Index and query disagree: `embedding mismatch: index vectors are "..." but the configured provider is "..."`
+- Nothing to search: `the index holds no embeddings to search with "..."`

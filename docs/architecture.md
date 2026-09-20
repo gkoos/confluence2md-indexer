@@ -30,7 +30,9 @@ This keeps one implementation path for command behavior while preserving stable 
 - `internal/query`
   - retrieval and fusion logic
 - `internal/embedding`
-  - embedding provider selection and generation
+  - embedding provider interface, registry and resolution
+  - provider implementations (offline bag-of-words, OpenAI, OpenAI-compatible)
+  - identity fingerprinting and capability reporting
 
 ## Index Command Flow
 
@@ -66,12 +68,28 @@ This keeps one implementation path for command behavior while preserving stable 
 
 SQLite database stores:
 
-- schema version table
-- indexing runs
+- indexing runs and the embedding identity each run recorded
 - documents
 - chunks
-- embeddings
+- embeddings, keyed by chunk and embedding identity
 - FTS virtual table for lexical search
+
+The schema is created when absent and is not versioned: there are no released
+users yet, so a database written by an older build is rebuilt with `--rebuild`
+rather than upgraded in place.
+
+## Embedding Resolution
+
+Provider selection and identity tracking run through one code path shared by
+indexing and querying:
+
+1. Flags, then `CONFLUENCE2MD_EMBEDDING_*` variables, then defaults select a provider.
+2. The provider reports an identity string (model, dimension, endpoint, prefixes).
+3. Indexing stores that identity with every vector it writes and removes vectors of other identities.
+4. Querying compares the resolved provider with the identities stored in the index.
+5. A mismatch fails the query with exit code 2 rather than comparing vectors from different spaces.
+
+See [embedding-providers.md](embedding-providers.md) for the provider matrix and setup recipes.
 
 ## Output Contract Stability
 
@@ -86,5 +104,6 @@ Contract stability is protected by:
 ## Related Docs
 
 - [Query examples](query-examples.md)
+- [Embedding providers](embedding-providers.md)
 - [Operations and troubleshooting](operations.md)
 - [MCP integration decision](mcp-integration-decision.md)
