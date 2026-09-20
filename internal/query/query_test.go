@@ -9,13 +9,14 @@ import (
 
 	"github.com/gkoos/confluence2md-indexer/internal/db"
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
+	"github.com/gkoos/confluence2md-indexer/internal/embedding/embeddingtest"
 )
 
 func TestRunHybridWeightedPrefersLexicalWithHighAlpha(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, total, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, total, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "banana",
 		Mode:       "hybrid",
 		Fusion:     "weighted",
@@ -41,7 +42,7 @@ func TestRunHybridRRFCombinesBothChannels(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, _, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "banana",
 		Mode:       "hybrid",
 		Fusion:     "rrf",
@@ -67,7 +68,7 @@ func TestRunTopKLimit(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, _, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "banana",
 		Mode:       "lexical",
 		TopK:       1,
@@ -85,7 +86,7 @@ func TestRunExpandStitchesNeighborChunks(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, _, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "middleterm",
 		Mode:       "lexical",
 		TopK:       1,
@@ -119,7 +120,7 @@ func TestRunPaginationOffsetLimit(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
 
-	results, total, err := Run(context.Background(), database, embedding.NewHashProvider(8), Request{
+	results, total, err := Run(context.Background(), database, embeddingtest.New(8), Request{
 		Text:       "neighbor",
 		Mode:       "lexical",
 		TopK:       5,
@@ -230,9 +231,9 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 		}
 	}
 
-	provider := embedding.NewHashProvider(8)
+	provider := embeddingtest.New(8)
 	texts := []string{"apple and pear", "banana banana yellow", "left neighbor", "middleterm center", "right neighbor"}
-	vectors, err := provider.Embed(context.Background(), texts)
+	vectors, err := provider.Embed(context.Background(), embedding.KindDocument, texts)
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

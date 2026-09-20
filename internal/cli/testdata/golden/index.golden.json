@@ -17,8 +17,8 @@
     "updated": 0
   },
   "embedding": {
-    "provider": "hash-local",
-    "source": "hash-fallback",
+    "provider": "bow-local:fnv1a@256",
+    "source": "default",
     "written": 1
   },
   "incremental": true,

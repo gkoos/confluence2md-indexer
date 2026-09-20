@@ -50,8 +50,8 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	if database == nil {
 		return nil, 0, fmt.Errorf("database is nil")
 	}
-	if provider == nil {
-		provider = embedding.NewHashProvider(256)
+	if err := requireVectorProvider(provider, req.Mode); err != nil {
+		return nil, 0, err
 	}
 
 	req.Text = strings.TrimSpace(req.Text)
@@ -90,7 +90,7 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	}
 
 	if req.Mode == "vector" || req.Mode == "hybrid" {
-		vecs, err := provider.Embed(ctx, []string{req.Text})
+		vecs, err := provider.Embed(ctx, embedding.KindQuery, []string{req.Text})
 		if err != nil {
 			return nil, 0, fmt.Errorf("query embedding: %w", err)
 		}
@@ -269,4 +269,23 @@ func normalizeScores(candidates []db.Candidate, selector func(db.Candidate) floa
 		out[c.ChunkID] = (v - min) / (max - min)
 	}
 	return out
+}
+
+// requireVectorProvider guards the vector channel. Modes that need embeddings
+// must have a usable provider, and explicitly disabled embeddings must fail with
+// guidance instead of silently degrading to lexical-only results.
+func requireVectorProvider(provider embedding.Provider, mode string) error {
+	if mode != "vector" && mode != "hybrid" {
+		return nil
+	}
+	if provider == nil {
+		return fmt.Errorf("query mode %q requires an embedding provider", mode)
+	}
+	if !provider.Caps().Enabled() {
+		return fmt.Errorf(
+			"query mode %q requires embeddings, but they are disabled (drop --skip-embeddings or select a provider with --embedding)",
+			mode,
+		)
+	}
+	return nil
 }

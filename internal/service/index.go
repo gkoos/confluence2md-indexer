@@ -15,6 +15,10 @@ type IndexRequest struct {
 	Folder  string
 	DBPath  string
 	Rebuild bool
+	// Provider overrides provider resolution. Tests inject a deterministic
+	// provider here; command paths leave it nil and resolve from flags,
+	// environment and defaults.
+	Provider embedding.Provider
 }
 
 type IndexResponse struct {
@@ -84,8 +88,10 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index ingestion failed: %w", err)
 	}
 
-	embFactory := embedding.NewDefaultFromEnv()
-	embProvider := embFactory.Provider
+	embProvider, embSource, err := resolveIndexProvider(req.Provider)
+	if err != nil {
+		return nil, err
+	}
 
 	var inserted, updated, skipped, chunkWrites, embeddingWrites int
 	keepIDs := make([]string, 0, len(docs))
@@ -127,8 +133,8 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		}
 		chunkWrites += written
 
-		if written > 0 && len(chunkRecords) > 0 {
-			vectors, err := embProvider.Embed(ctx, chunkTexts)
+		if written > 0 && len(chunkRecords) > 0 && embProvider.Caps().Enabled() {
+			vectors, err := embProvider.Embed(ctx, embedding.KindDocument, chunkTexts)
 			if err != nil {
 				return nil, fmt.Errorf("index embedding failed for page %s: %w", doc.PageID, err)
 			}
@@ -172,7 +178,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		Rebuild:         req.Rebuild,
 		DBPath:          dbPath,
 		EmbeddingName:   embProvider.Name(),
-		EmbeddingSource: embFactory.Source,
+		EmbeddingSource: embSource,
 		EmbeddingWrites: embeddingWrites,
 		InputFolder:     summary.FolderPath,
 		MetadataPath:    summary.MetadataPath,
@@ -186,4 +192,18 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		RunID:           run.ID,
 		DBStats:         dbStats,
 	}, nil
+}
+
+// resolveIndexProvider prefers an injected provider so tests never touch the
+// network, and otherwise resolves one from flags, environment and defaults.
+func resolveIndexProvider(injected embedding.Provider) (embedding.Provider, string, error) {
+	if injected != nil {
+		return injected, "injected", nil
+	}
+
+	resolution, err := embedding.Resolve(embedding.Options{})
+	if err != nil {
+		return nil, "", fmt.Errorf("index embedding provider setup failed: %w", err)
+	}
+	return resolution.Provider, resolution.Source, nil
 }

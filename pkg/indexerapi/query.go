@@ -32,8 +32,12 @@ func Query(ctx context.Context, dbPath string, req QueryRequest) (*QueryResponse
 	}
 	defer func() { _ = database.Close() }()
 
-	provider := embedding.NewDefaultFromEnv().Provider
-	results, total, err := query.Run(ctx, database, provider, req)
+	resolution, err := embedding.Resolve(embedding.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("query embedding provider setup failed: %w", err)
+	}
+
+	results, total, err := query.Run(ctx, database, resolution.Provider, req)
 	if err != nil {
 		return nil, err
 	}

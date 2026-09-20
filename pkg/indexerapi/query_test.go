@@ -36,13 +36,17 @@ func TestQueryReturnsResults(t *testing.T) {
 		t.Fatalf("seed doc: %v", err)
 	}
 
-	vectors, err := embedding.NewHashProvider(8).Embed(ctx, []string{"banana text"})
+	resolution, err := embedding.Resolve(embedding.Options{})
+	if err != nil {
+		t.Fatalf("resolve provider: %v", err)
+	}
+	vectors, err := resolution.Provider.Embed(ctx, embedding.KindDocument, []string{"banana text"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	_, err = db.UpsertEmbeddings(ctx, database, []db.EmbeddingRecord{{
 		ChunkID:   "p1:000000",
-		Model:     "hash-local",
+		Model:     resolution.Provider.Name(),
 		Dimension: len(vectors[0]),
 		Vector:    vectors[0],
 	}})

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
+	"github.com/gkoos/confluence2md-indexer/internal/embedding/embeddingtest"
 )
 
 func TestMigrateAndRunLifecycle(t *testing.T) {
@@ -170,8 +171,8 @@ func TestSearchLexicalAndVectorWithFilters(t *testing.T) {
 		t.Fatalf("seed doc 2: %v", err)
 	}
 
-	provider := embedding.NewHashProvider(8)
-	vectors, err := provider.Embed(ctx, []string{"banana apple", "grape orange"})
+	provider := embeddingtest.New(8)
+	vectors, err := provider.Embed(ctx, embedding.KindDocument, []string{"banana apple", "grape orange"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
