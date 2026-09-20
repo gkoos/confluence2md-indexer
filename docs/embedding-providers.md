@@ -47,9 +47,14 @@ Provider configuration is resolved once, in this order:
 
 1. flags (`--embedding-*`), then
 2. environment variables (`CONFLUENCE2MD_EMBEDDING_*`), then
-3. built-in defaults (`bow-local` at 256 dimensions).
+3. the optional `embedding` section of the configuration file (`config.yaml` in the working directory, or a
+   file named by `--config` / `CONFLUENCE2MD_CONFIG`), then
+4. built-in defaults (`bow-local` at 256 dimensions).
 
-There is no config file. The `embedding.source` field in index output reports which layer chose the provider *id* (`flag`, `env` or `default`).
+Presence decides, not emptiness: a flag that was passed wins even when it sets an empty value, and an
+environment variable counts when it is set to anything other than an empty string. The `embedding.source`
+field in index output reports which layer chose the provider *id* (`flag`, `env`, `config` or `default`). The
+file reference is in [operations.md](operations.md#configuration-file).
 
 ### The mismatch guard
 
@@ -170,7 +175,7 @@ A server with a different wire shape needs its own adapter. HF text-embeddings-i
 
 ## Flag and environment reference
 
-Every flag has an environment variable twin, `CONFLUENCE2MD_EMBEDDING_<NAME>`, and flags win over the environment.
+Every flag has an environment variable twin, `CONFLUENCE2MD_EMBEDDING_<NAME>`, and flags win over the environment. The configuration file (when present) writes the same settings as `embedding.<name>`, so `--embedding-base-url` is `CONFLUENCE2MD_EMBEDDING_BASE_URL` is `embedding.base_url`.
 
 | flag | env suffix | meaning |
 | --- | --- | --- |
@@ -193,6 +198,10 @@ Every flag has an environment variable twin, `CONFLUENCE2MD_EMBEDDING_<NAME>`, a
 | `--lexical-only` (query only) | - | force `--mode lexical` |
 
 Malformed values are reported rather than ignored: `CONFLUENCE2MD_EMBEDDING_DIM=wide` fails with `must be an integer`.
+
+A credential has no flag, deliberately, because a key on the command line would land in shell history. Name a
+variable with `--embedding-api-key-env` / `embedding.api_key_env`, or store the literal key as
+`embedding.api_key` in the git-ignored `config.yaml`.
 
 Setting the environment once is the most reliable way to keep index and query aligned:
 

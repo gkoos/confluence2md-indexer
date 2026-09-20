@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gkoos/confluence2md-indexer/internal/config"
 	"github.com/gkoos/confluence2md-indexer/internal/db"
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
 	"github.com/gkoos/confluence2md-indexer/internal/query"
@@ -61,6 +62,7 @@ func (a *App) runIndex(args []string) int {
 	fs.SetOutput(os.Stderr)
 
 	dbPathFlag := fs.String("db", "", "Path to the SQLite database file (defaults to the input folder)")
+	configPath := registerConfigFlag(fs)
 	rebuild := fs.Bool("rebuild", false, "Recreate the database file before indexing")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON output")
 	skipEmbeddings := fs.Bool("skip-embeddings", false, "Store no embeddings and leave the vector channel empty")
@@ -82,19 +84,29 @@ func (a *App) runIndex(args []string) int {
 		folder = folders[0]
 	}
 
-	options, err := embeddingValues.options()
+	flagOptions, err := embeddingValues.options()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "index: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	if isProviderListRequest(flagOptions.Provider) {
+		printProviderList(os.Stdout)
+		return exitCodeOK
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "index: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	options, err := resolveEmbeddingOptions(flagOptions, embeddingValues.present(fs), cfg.File)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
 		return exitCodeInvalidUsage
 	}
 	options.Skip = options.Skip || *skipEmbeddings
 
-	if isProviderListRequest(options.Provider) {
-		printProviderList(os.Stdout)
-		return exitCodeOK
-	}
-
-	dbPath, err := resolveDBPath(folder, *dbPathFlag)
+	dbPath, err := resolveDBPath(folder, *dbPathFlag, cfg.File.DBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
 		return exitCodeInvalidUsage
@@ -251,6 +263,81 @@ func (values *embeddingFlags) options() (embedding.Options, error) {
 	}, nil
 }
 
+// present reports which embedding flags the user passed. Presence, not value,
+// decides precedence: a flag that sets an empty value still overrides the
+// environment and the configuration file.
+func (values *embeddingFlags) present(fs *flag.FlagSet) embedding.Present {
+	visited := flagNamesVisited(fs)
+
+	var present embedding.Present
+	present.Provider = visited["embedding"]
+	present.Model = visited["embedding-model"]
+	present.BaseURL = visited["embedding-base-url"]
+	present.Path = visited["embedding-path"]
+	present.Dimension = visited["embedding-dim"]
+	present.APIKeyEnv = visited["embedding-api-key-env"]
+	present.AuthHeader = visited["embedding-auth-header"]
+	present.AuthScheme = visited["embedding-auth-scheme"]
+	present.Headers = visited["embedding-header"]
+	present.QueryParams = visited["embedding-query-param"]
+	present.DocPrefix = visited["embedding-document-prefix"]
+	present.QueryPrefix = visited["embedding-query-prefix"]
+	present.BatchSize = visited["embedding-batch-size"]
+	present.Timeout = visited["embedding-timeout"]
+	present.MaxRetries = visited["embedding-max-retries"]
+
+	return present
+}
+
+// flagNamesVisited returns the names of the flags the user passed, which is how a
+// value that is explicitly empty stays distinguishable from a default.
+func flagNamesVisited(fs *flag.FlagSet) map[string]bool {
+	visited := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) {
+		visited[f.Name] = true
+	})
+	return visited
+}
+
+// registerConfigFlag declares --config on a subcommand. A missing default
+// config.yaml is not an error, because the tool runs without a file.
+func registerConfigFlag(fs *flag.FlagSet) *string {
+	return fs.String(
+		"config",
+		"",
+		fmt.Sprintf("Path to a YAML configuration file (defaults to %s when present)", config.DefaultFileName),
+	)
+}
+
+// resolveEmbeddingOptions applies the embedding configuration layers in order:
+// flags the user passed, environment variables that are set, keys the
+// configuration file carries, then built-in defaults.
+func resolveEmbeddingOptions(flagOptions embedding.Options, flagPresent embedding.Present, file config.File) (embedding.Options, error) {
+	envOptions, envPresent, err := embedding.ReadEnv()
+	if err != nil {
+		return embedding.Options{}, err
+	}
+
+	return config.MergeEmbedding(
+		embedding.Layer{Name: embedding.SourceFlag, Options: flagOptions, Present: flagPresent},
+		embedding.Layer{Name: embedding.SourceEnv, Options: envOptions, Present: envPresent},
+		file,
+	), nil
+}
+
+// resolveQueryDBPath picks the database for query and stats: --db when the user
+// passed it, then db.path from the configuration file, then the default name in
+// the working directory.
+func resolveQueryDBPath(dbPathFlag string, visited map[string]bool, file config.File) string {
+	if visited["db"] {
+		return dbPathFlag
+	}
+	if configured := file.DBPath(); configured != "" {
+		return configured
+	}
+	return dbPathFlag
+}
+
 // parseInterspersed parses flags that may appear before or after positional
 // arguments. The standard flag package stops at the first positional argument,
 // which would reject the documented "index <folder> --rebuild --json" form.
@@ -285,7 +372,8 @@ func (a *App) runQuery(args []string) int {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	dbPath := fs.String("db", defaultDBFileName, "Path to SQLite DB file")
+	dbPathFlag := fs.String("db", defaultDBFileName, "Path to SQLite DB file")
+	configPath := registerConfigFlag(fs)
 	queryText := fs.String("q", "", "Query text")
 	mode := fs.String("mode", "hybrid", "Retrieval mode: hybrid|lexical|vector")
 	fusion := fs.String("fusion", "weighted", "Fusion mode: weighted|rrf")
@@ -310,12 +398,8 @@ func (a *App) runQuery(args []string) int {
 		return exitCodeInvalidUsage
 	}
 
-	modeSet := false
-	fs.Visit(func(visited *flag.Flag) {
-		if visited.Name == "mode" {
-			modeSet = true
-		}
-	})
+	visited := flagNamesVisited(fs)
+	modeSet := visited["mode"]
 	if *lexicalOnly {
 		if modeSet && *mode != "lexical" {
 			fmt.Fprintf(os.Stderr, "query --lexical-only conflicts with --mode %s\n", *mode)
@@ -324,12 +408,12 @@ func (a *App) runQuery(args []string) int {
 		*mode = "lexical"
 	}
 
-	embeddingOptions, err := embeddingValues.options()
+	flagOptions, err := embeddingValues.options()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "query: %v\n", err)
 		return exitCodeInvalidUsage
 	}
-	if isProviderListRequest(embeddingOptions.Provider) {
+	if isProviderListRequest(flagOptions.Provider) {
 		printProviderList(os.Stdout)
 		return exitCodeOK
 	}
@@ -338,7 +422,19 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintln(os.Stderr, "query requires --q")
 		return exitCodeInvalidUsage
 	}
-	if strings.TrimSpace(*dbPath) == "" {
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	embeddingOptions, err := resolveEmbeddingOptions(flagOptions, embeddingValues.present(fs), cfg.File)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	dbPath := resolveQueryDBPath(*dbPathFlag, visited, cfg.File)
+	if strings.TrimSpace(dbPath) == "" {
 		fmt.Fprintln(os.Stderr, "query requires a non-empty --db path")
 		return exitCodeInvalidUsage
 	}
@@ -414,7 +510,7 @@ func (a *App) runQuery(args []string) int {
 		},
 	}
 
-	queryResp, err := service.Query(ctx, *dbPath, req)
+	queryResp, err := service.Query(ctx, dbPath, req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "query: %v\n", err)
 		return exitCodeInvalidUsage
@@ -426,7 +522,7 @@ func (a *App) runQuery(args []string) int {
 		payload := map[string]any{
 			"schemaVersion": outputSchemaV1,
 			"command":       "query",
-			"dbPath":        *dbPath,
+			"dbPath":        dbPath,
 			"request":       req,
 			"count":         len(results),
 			"total":         total,
@@ -474,7 +570,8 @@ func (a *App) runStats(args []string) int {
 	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	dbPath := fs.String("db", defaultDBFileName, "Path to SQLite DB file")
+	dbPathFlag := fs.String("db", defaultDBFileName, "Path to SQLite DB file")
+	configPath := registerConfigFlag(fs)
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON stats")
 
 	if err := fs.Parse(args); err != nil {
@@ -485,13 +582,20 @@ func (a *App) runStats(args []string) int {
 		fmt.Fprintln(os.Stderr, "stats does not accept positional arguments")
 		return exitCodeInvalidUsage
 	}
-	if strings.TrimSpace(*dbPath) == "" {
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stats: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	dbPath := resolveQueryDBPath(*dbPathFlag, flagNamesVisited(fs), cfg.File)
+	if strings.TrimSpace(dbPath) == "" {
 		fmt.Fprintln(os.Stderr, "stats requires a non-empty --db path")
 		return exitCodeInvalidUsage
 	}
 
 	ctx := context.Background()
-	statsResp, err := service.Stats(ctx, *dbPath)
+	statsResp, err := service.Stats(ctx, dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stats: %v\n", err)
 		return exitCodeInvalidUsage
@@ -502,7 +606,7 @@ func (a *App) runStats(args []string) int {
 		payload := map[string]any{
 			"schemaVersion": outputSchemaV1,
 			"command":       "stats",
-			"dbPath":        *dbPath,
+			"dbPath":        dbPath,
 			"stats":         stats,
 		}
 		b, _ := json.MarshalIndent(payload, "", "  ")
@@ -510,7 +614,7 @@ func (a *App) runStats(args []string) int {
 		return exitCodeOK
 	}
 
-	fmt.Printf("db path: %s\n", *dbPath)
+	fmt.Printf("db path: %s\n", dbPath)
 	fmt.Printf("runs: %d\n", stats.Runs)
 	fmt.Printf("documents: %d\n", stats.Documents)
 	fmt.Printf("chunks: %d\n", stats.Chunks)
@@ -530,9 +634,9 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "confluence2md-indexer - index and query confluence2md output")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Usage:")
-	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--rebuild] [--json] [--skip-embeddings]")
-	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
-	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--json]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--config file] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--config file] [--json]")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Indexing defaults to incremental mode; use --rebuild for full rebuild.")
 	_, _ = fmt.Fprintln(out)
@@ -549,8 +653,14 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "  --embedding-batch-size <n>   --embedding-timeout <dur>   --embedding-max-retries <n>")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Query and index must use the same embedding identity; a mismatch is reported")
-	_, _ = fmt.Fprintln(out, "instead of returning empty results. CONFLUENCE2MD_EMBEDDING_* environment")
-	_, _ = fmt.Fprintln(out, "variables provide the same settings and are overridden by these flags.")
+	_, _ = fmt.Fprintln(out, "instead of returning empty results.")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Configuration file, accepted by every subcommand:")
+	_, _ = fmt.Fprintln(out, "  --config <file>              YAML file with db and embedding sections;")
+	_, _ = fmt.Fprintln(out, "                               defaults to config.yaml when it exists")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "A setting resolves from the flag you pass, then the CONFLUENCE2MD_EMBEDDING_*")
+	_, _ = fmt.Fprintln(out, "environment variable, then the configuration file, then the built-in default.")
 }
 
 func summarizeText(s string, max int) string {
@@ -605,10 +715,17 @@ func buildExplainSummary(results []query.Result, req query.Request) []string {
 	return lines
 }
 
-func resolveDBPath(folder string, dbPathFlag string) (string, error) {
-	if strings.TrimSpace(dbPathFlag) != "" {
+// resolveDBPath picks the index location: --db when the user passed it, then
+// db.path from the configuration file, then the default file inside the indexed
+// folder.
+func resolveDBPath(folder string, dbPathFlag string, configuredPath string) (string, error) {
+	switch {
+	case strings.TrimSpace(dbPathFlag) != "":
 		return filepath.Abs(dbPathFlag)
+	case strings.TrimSpace(configuredPath) != "":
+		return filepath.Abs(configuredPath)
 	}
+
 	folderAbs, err := filepath.Abs(folder)
 	if err != nil {
 		return "", fmt.Errorf("resolve folder %q: %w", folder, err)

@@ -44,12 +44,17 @@ func Resolve(opts Options) (Resolution, error) {
 		return Resolution{}, err
 	}
 
-	source := SourceDefault
-	switch {
-	case providerFromFlag:
-		source = SourceFlag
-	case providerFromEnv:
-		source = SourceEnv
+	// Callers that merged configuration layers know which layer selected the
+	// provider; for hand-built options, infer it from where the id came from.
+	source := strings.TrimSpace(opts.Source)
+	if source == "" {
+		source = SourceDefault
+		switch {
+		case providerFromFlag:
+			source = SourceFlag
+		case providerFromEnv:
+			source = SourceEnv
+		}
 	}
 
 	if resolved.Skip {

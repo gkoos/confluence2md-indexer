@@ -85,9 +85,9 @@ confluence2md-indexer stats --db ./output/confluence2md-index.db --json
 ### CLI Usage
 
 ```text
-confluence2md-indexer index [folder] [--db path] [--rebuild] [--json] [--skip-embeddings]
+confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings]
 confluence2md-indexer query --q text
-  [--db path]
+  [--db path] [--config file]
   [--mode hybrid|lexical|vector]
   [--fusion weighted|rrf] [--alpha 0..1] [--rrf-k N]
   [--top-k N] [--candidate-k N]
@@ -101,13 +101,58 @@ confluence2md-indexer query --q text
   [--embedding-query-prefix text] [--embedding-batch-size N]
   [--embedding-timeout dur] [--embedding-max-retries N]
   [--embedding-auth-header name] [--embedding-auth-scheme scheme] [--embedding-path path]
-confluence2md-indexer stats [--db path] [--json]
+confluence2md-indexer stats [--db path] [--config file] [--json]
 ```
 
 Use `--embedding list` to print the available providers. Index and query must be
 given the same embedding settings; see [docs/embedding-providers.md](docs/embedding-providers.md).
 
 See [docs/query-examples.md](docs/query-examples.md) for practical command patterns.
+
+### Configuration File
+
+`db` and `embedding` settings can also live in an optional YAML file, which keeps long command lines and
+credentials out of your shell history. Copy [`config.example.yaml`](config.example.yaml) to `config.yaml` next
+to where you run the tool and edit it; `config.yaml` is git-ignored, so a credential never lands in the
+repository.
+
+```sh
+cp config.example.yaml config.yaml
+confluence2md-indexer index ./output                        # reads ./config.yaml
+confluence2md-indexer index ./output --config ~/c2md.yaml   # or a file of your choosing
+```
+
+```yaml
+db:
+  path: ""                # empty keeps the database inside the indexed folder
+embedding:
+  provider: "openai-compatible"
+  model: "Qwen/Qwen3-Embedding-0.6B"
+  base_url: "https://api.siliconflow.com/v1"
+  dimension: 1024
+  api_key_env: "SILICONFLOW_API_KEY"   # or api_key: "sk-..."; set only one of the two
+```
+
+Precedence, highest first: **flag passed** > **environment variable set** > **key present in the file** >
+**built-in default**. Presence decides, not emptiness, so `--embedding-document-prefix ""` clears a value that
+the file supplies.
+
+| setting | flag | environment | file key |
+| --- | --- | --- | --- |
+| provider id | `--embedding` | `CONFLUENCE2MD_EMBEDDING_PROVIDER` | `embedding.provider` |
+| base URL | `--embedding-base-url` | `CONFLUENCE2MD_EMBEDDING_BASE_URL` | `embedding.base_url` |
+| index location | `--db` | - | `db.path` |
+
+- Without a file the tool behaves exactly as before: flags, environment variables and built-in defaults.
+  A missing `config.yaml` in the working directory is not an error, while a `--config` path that does not
+  exist is, because it names a file on purpose.
+- Unknown keys are rejected, so a typo never silently falls back to a default.
+- `embedding.source` in index output reports the layer that decided: `flag`, `env`, `config` or `default`.
+- `CONFLUENCE2MD_CONFIG=/etc/c2md/config.yaml` moves the file out of the working directory; `--config` still
+  wins over both.
+
+The complete key reference, the credential rules and the list-versus-comma caveats are in
+[docs/operations.md](docs/operations.md#configuration-file).
 
 ### In-process Query API (for MCP)
 
@@ -225,7 +270,7 @@ Embedding providers are pluggable and are selected explicitly or from the enviro
 - **`openai`**: the OpenAI embeddings API, selected with `--embedding openai` and `OPENAI_API_KEY` (default model `text-embedding-3-small`). Token costs apply.
 - **`openai-compatible`**: any endpoint speaking the OpenAI embeddings protocol, including Azure OpenAI, Ollama, LM Studio, llama.cpp server, vLLM and hosted providers such as SiliconFlow. Requires `--embedding-base-url`, `--embedding-model` and `--embedding-dim`.
 
-Providers are resolved from flags first, then `CONFLUENCE2MD_EMBEDDING_*` environment variables, then the offline default; `OPENAI_API_KEY` no longer selects OpenAI on its own. `--embedding list` prints the registered providers.
+Providers are resolved from flags first, then `CONFLUENCE2MD_EMBEDDING_*` environment variables, then the optional `embedding` section of `config.yaml`, then the offline default; `OPENAI_API_KEY` no longer selects OpenAI on its own. `--embedding list` prints the registered providers.
 
 Index and query must resolve to the same **identity**, because vectors from different models or dimensions are not comparable. A mismatch is reported with exit code 2 instead of returning empty results, and re-indexing with a different provider re-embeds the corpus automatically.
 

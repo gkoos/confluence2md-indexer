@@ -13,7 +13,7 @@ func TestE2EGoldenContracts(t *testing.T) {
 	root := t.TempDir()
 	copyFixtureCorpus(t, filepath.Join("testdata", "e2e-corpus"), root)
 
-	app := NewApp()
+	app := newTestApp(t)
 
 	indexOut := captureStdout(t, func() {
 		exit := app.Run([]string{"index", root, "--json"})

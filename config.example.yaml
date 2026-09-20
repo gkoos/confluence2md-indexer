@@ -1,0 +1,65 @@
+# confluence2md-indexer configuration file.
+#
+# Copy this file to config.yaml and edit it. config.yaml is git-ignored so a
+# credential never lands in the repository; keep this example free of secrets.
+# Every key is optional and the file itself is optional: without it the tool runs
+# on its flags, its environment variables and its built-in defaults.
+#
+# Precedence, highest first: a flag you pass > an environment variable that is set
+# > a key in this file > the built-in default. Presence decides, so a flag that
+# sets an empty value also clears a value that this file supplies, for example
+# --embedding-document-prefix "".
+#
+# Embedding keys mirror the --embedding-* flags and the CONFLUENCE2MD_EMBEDDING_*
+# variables, so embedding.dimension is also CONFLUENCE2MD_EMBEDDING_DIM.
+#
+# The values below are the defaults: a copied file behaves exactly like no file at
+# all. Uncomment the OpenAI-compatible example near base_url to switch providers.
+
+db:
+  # Index location. Empty keeps the default, a database file inside the indexed
+  # folder.
+  path: ""
+
+embedding:
+  # Provider id. bow-local (default) needs no network; use "list" with
+  # --embedding to enumerate every registered provider.
+  provider: "bow-local"
+
+  # Model name as the endpoint knows it, for example "Qwen/Qwen3-Embedding-0.6B".
+  model: ""
+
+  # Endpoint for the HTTP providers, for example "https://api.siliconflow.com/v1"
+  # with path "/embeddings", or "https://api.openai.com/v1".
+  base_url: ""
+  path: ""
+
+  # Vector dimension. It must match the dimension already stored in the index;
+  # indexing refuses to mix vectors from different models instead of silently
+  # returning empty results.
+  dimension: 0
+
+  # Credentials. Prefer api_key_env: it names the variable that holds the key.
+  # api_key stores the secret in this file, which is ignored by git. Set only one.
+  api_key: ""
+  api_key_env: ""
+
+  # Request decoration for gateways: an auth header and scheme, plus extra headers
+  # and query parameters. Lists are YAML lists, not comma-separated strings.
+  auth_header: ""
+  auth_scheme: ""
+  headers: []
+  query_params: []
+
+  # Asymmetric prefixes. E5-style models expect document_prefix: "passage: " and
+  # query_prefix: "query: ".
+  document_prefix: ""
+  query_prefix: ""
+
+  # Request sizing and retries.
+  batch_size: 64
+  timeout: 45s
+  max_retries: 3
+
+  # skip: true indexes text only, leaving the vector channel empty.
+  skip: false

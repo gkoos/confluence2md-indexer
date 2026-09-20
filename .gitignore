@@ -10,6 +10,10 @@ build/
 # Test artifacts
 coverage.out
 
+# Configuration file (holds credentials; keep the example tracked instead)
+/config.yaml
+/config.yml
+
 # OS/editor
 .DS_Store
 Thumbs.db
