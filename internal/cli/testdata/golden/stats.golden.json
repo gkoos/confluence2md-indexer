@@ -4,6 +4,16 @@
   "schemaVersion": "1",
   "stats": {
     "chunks": 1,
+    "corpus": {
+      "crawlCompletedAt": "",
+      "crawlMode": "",
+      "crawlStartedAt": "",
+      "crawlSucceededAt": "",
+      "indexedAt": "\u003cindexed-at\u003e",
+      "pageCount": 1,
+      "runId": "\u003crun-id\u003e",
+      "seedCount": 0
+    },
     "documents": 1,
     "embeddingModels": [
       {
@@ -13,6 +23,16 @@
       }
     ],
     "embeddings": 1,
+    "metadata": {
+      "documents": 1,
+      "hosts": 0,
+      "nested": 0,
+      "seeds": 0,
+      "withAttachments": 0,
+      "withAuthors": 0,
+      "withComments": 0,
+      "withLinks": 0
+    },
     "runs": 1,
     "vectorCapability": "lexical",
     "vectorName": "bow-local:fnv1a@256",

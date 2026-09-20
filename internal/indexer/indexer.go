@@ -12,14 +12,39 @@ const MetadataFileName = "metadata.json"
 
 type metadataFile struct {
 	Pages map[string]pageRecord `json:"pages"`
+	// Root fields describe the crawl that produced the pages. They are stored with
+	// the index so stats can report how stale it is.
+	SeedPageIDs                    []string `json:"seed_page_ids"`
+	CrawlStartedAt                 string   `json:"crawl_started_at"`
+	LastCompletedCrawlCompletedAt  string   `json:"last_completed_crawl_completed_at"`
+	LastCompletedCrawlMode         string   `json:"last_completed_crawl_mode"`
+	LastSuccessfulCrawlCompletedAt string   `json:"last_successful_crawl_completed_at"`
 }
 
+// pageRecord is one entry of metadata.json. Only the fields the indexer stores are
+// decoded; the crawler writes more, and unknown keys are ignored on purpose so a
+// newer crawler keeps working with an older indexer.
 type pageRecord struct {
-	LocalPath      string `json:"local_path"`
-	Title          string `json:"title"`
-	SpaceKey       string `json:"space_key"`
-	LastModifiedAt string `json:"last_modified_at"`
-	SourceURL      string `json:"source_url"`
+	ID                 string   `json:"id"`
+	Host               string   `json:"host"`
+	LocalPath          string   `json:"local_path"`
+	Title              string   `json:"title"`
+	SpaceKey           string   `json:"space_key"`
+	Version            int      `json:"version"`
+	Depth              int      `json:"depth"`
+	CrawledAt          string   `json:"crawled_at"`
+	CreatedAt          string   `json:"created_at"`
+	LastModifiedAt     string   `json:"last_modified_at"`
+	SourceURL          string   `json:"source_url"`
+	CanonicalURL       string   `json:"canonical_url"`
+	ConfluenceParentID string   `json:"confluence_parent_id"`
+	CreatedByName      string   `json:"created_by_name"`
+	LastModifiedByName string   `json:"last_modified_by_name"`
+	OutgoingLinks      []string `json:"outgoing_links"`
+	IncomingLinks      []string `json:"incoming_links"`
+	Attachments        []string `json:"attachments"`
+	CommentCount       int      `json:"comment_count"`
+	FetchError         string   `json:"fetch_error"`
 }
 
 type PreflightSummary struct {

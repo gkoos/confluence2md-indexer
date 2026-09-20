@@ -22,6 +22,7 @@
   "documents": {
     "deleted": 0,
     "inserted": 1,
+    "metadata": 0,
     "skipped": 0,
     "updated": 0
   },

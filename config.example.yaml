@@ -63,3 +63,34 @@ embedding:
 
   # skip: true indexes text only, leaving the vector channel empty.
   skip: false
+
+query:
+  # Defaults for the query command. A flag you pass still wins, an empty one included,
+  # so one invocation can override or clear anything set here. Zero and empty values
+  # mean "use the built-in default".
+  #
+  # The values below are the built-in defaults, so a copied file changes nothing.
+  # Filters (--author, --space, --depth-min, ...) stay on the command line: they
+  # describe one question rather than one corpus.
+
+  # Retrieval mode and fusion strategy.
+  mode: "hybrid"
+  fusion: "weighted"
+
+  # Lexical weight for weighted fusion.
+  alpha: 0.70
+
+  # Result count, candidates per channel, and adjacent-chunk expansion.
+  top_k: 10
+  candidate_k: 50
+  expand: 0
+
+  # Ranking priors: recency, authority, seed, depth, richness. An empty list leaves
+  # ranking to text relevance and fusion, which is the default.
+  priors: []
+
+  # Largest relative score adjustment from the priors (0 = built-in default 0.15).
+  prior_strength: 0
+
+  # Age at which the recency prior falls to half (0s = built-in default 180d).
+  recency_half_life: 0s
