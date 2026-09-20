@@ -28,10 +28,27 @@ const (
 	outputSchemaV1    = service.OutputSchemaVersion
 )
 
-type App struct{}
+// DefaultVersion is what a build the release pipeline did not stamp reports.
+const DefaultVersion = "dev"
+
+// App runs the command line interface.
+type App struct {
+	// Version is the build identity, reported by --version and logged on startup. An
+	// empty value falls back to DefaultVersion.
+	Version string
+}
 
 func NewApp() *App {
-	return &App{}
+	return &App{Version: DefaultVersion}
+}
+
+// version returns the build identity, falling back for a zero-value App.
+func (a *App) version() string {
+	if trimmed := strings.TrimSpace(a.Version); trimmed != "" {
+		return trimmed
+	}
+
+	return DefaultVersion
 }
 
 func (a *App) Run(args []string) int {
@@ -41,15 +58,26 @@ func (a *App) Run(args []string) int {
 	}
 
 	switch args[0] {
+	case "version", "-v", "--version":
+		// A bare version keeps $(confluence2md-indexer --version) usable in scripts.
+		_, _ = fmt.Fprintln(os.Stdout, a.version())
+		return exitCodeOK
+	case "help", "-h", "--help":
+		a.printUsage(os.Stdout)
+		return exitCodeOK
+	}
+
+	// Every real command reports which build is running, on stderr, so stdout stays a
+	// clean data channel for text and JSON output.
+	_, _ = fmt.Fprintf(os.Stderr, "confluence2md-indexer %s\n", a.version())
+
+	switch args[0] {
 	case "index":
 		return a.runIndex(args[1:])
 	case "query":
 		return a.runQuery(args[1:])
 	case "stats":
 		return a.runStats(args[1:])
-	case "help", "-h", "--help":
-		a.printUsage(os.Stdout)
-		return exitCodeOK
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n\n", args[0])
 		a.printUsage(os.Stderr)
@@ -770,6 +798,8 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--config file] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--config file] [--json]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer --version")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer help")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Metadata filters, accepted by query (metadata comes from the crawler output):")
 	_, _ = fmt.Fprintln(out, "  --space <key>                space_key, repeatable")

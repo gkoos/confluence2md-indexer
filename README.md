@@ -106,6 +106,7 @@ confluence2md-indexer query --q text
   [--embedding-timeout dur] [--embedding-max-retries N]
   [--embedding-auth-header name] [--embedding-auth-scheme scheme] [--embedding-path path]
 confluence2md-indexer stats [--db path] [--config file] [--json]
+confluence2md-indexer --version
 ```
 
 Use `--embedding list` to print the available providers. Index and query must be
