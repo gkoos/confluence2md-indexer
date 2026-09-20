@@ -39,6 +39,9 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
+      - name: Run vector smoke gate
+        run: go run ./internal/tools/smokevector
+
       - name: Run vet
         run: go vet ./...
 

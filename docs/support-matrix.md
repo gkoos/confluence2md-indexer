@@ -20,6 +20,7 @@ Policy:
 3. Vector smoke gate passes: index a fixture corpus with the default provider and query it with `--mode vector`, expecting results.
 4. End-to-end index/query/stats JSON contract smoke (golden tests in CI).
 
-Status: the vector smoke gate is not a dedicated task yet. CI currently covers the
-same behaviour through the golden contract tests and the provider unit tests; a
-`task smoke:vector` target is planned.
+The vector smoke gate is `task smoke:vector` (`go run ./internal/tools/smokevector`).
+It indexes a fixture corpus with the default provider and checks the vector query,
+hybrid fusion, lexical-only retrieval and the embedding identity guard, all without
+network access, and runs in CI on every push and pull request.

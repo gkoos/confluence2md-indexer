@@ -292,12 +292,14 @@ Operational limitations:
 ```sh
 task test
 task coverage:check
+task smoke:vector
 task lint
 ```
 
 Release and CI behavior:
 
 - coverage gate enforced in CI (`COVERAGE_MIN`, default 70)
+- offline vector smoke gate (`task smoke:vector`) runs in the test job
 - reproducible release builds across linux/windows/darwin on amd64 and arm64
 - contract tests for JSON command outputs
 
