@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.4.0...v0.5.0) (2026-09-20)
+
+
+### Features
+
+* **cli:** report the build through --version and on startup ([b339d54](https://github.com/gkoos/confluence2md-indexer/commit/b339d54efdeb613e56517dd952f6117f6a6c33d7))
+* **metadata:** index crawler metadata and filter queries by it ([ee17211](https://github.com/gkoos/confluence2md-indexer/commit/ee172118a5dd4573609aad7fdfba0b15dc92e20b))
+* **metadata:** index, filter and rank by crawler metadata ([4d681aa](https://github.com/gkoos/confluence2md-indexer/commit/4d681aa2f753dec3082b1a4605cd42ef57fa0834))
+* **query:** add metadata ranking priors and a query section for retrieval defaults ([18a2f71](https://github.com/gkoos/confluence2md-indexer/commit/18a2f7172de309b1a2ca744d7381a005b9a77b2f))
+* **stats:** report metadata coverage and crawl freshness ([3ebb8f4](https://github.com/gkoos/confluence2md-indexer/commit/3ebb8f4136649341526b048194df9b08887ede28))
+
+
+### Bug Fixes
+
+* **indexer:** stop reading headings inside fenced code blocks ([608a7e5](https://github.com/gkoos/confluence2md-indexer/commit/608a7e5bbc036c42c69d8daed05818e36fdc6f7e))
+
+
+### Reverts
+
+* metadata retrieval squash ([#18](https://github.com/gkoos/confluence2md-indexer/issues/18)) ([d96f5c2](https://github.com/gkoos/confluence2md-indexer/commit/d96f5c2b5419d669d9e5d7d62b0ba12fb7cb0a9a))
+
 ## [0.4.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.3.0...v0.4.0) (2026-09-20)
 
 
