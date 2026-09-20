@@ -35,7 +35,6 @@ Use full rebuild when:
 
 - you want to start from an empty database
 - the DB file was written by an older build whose schema predates embedding identity tracking
-- a release changed how pages are chunked, since that shifts stored chunk boundaries
 - index content looks inconsistent
 
 In rebuild mode the DB file is recreated before indexing, so all pages, chunks and
@@ -44,29 +43,6 @@ embeddings are written from scratch. This is destructive to the DB file at that 
 ```sh
 confluence2md-indexer index ./output --rebuild
 ```
-
-## Index Freshness and Coverage
-
-`stats` reports the crawl an index was built from, so staleness is visible without
-guessing:
-
-```sh
-confluence2md-indexer stats --db ./confluence2md-index.db
-```
-
-```text
-metadata: authors=3 links=0 attachments=2 comments=0 seeds=1 nested=2 hosts=2
-corpus: mode=updates pages=3 seeds=1 indexed 2026-09-20T19:04:13Z crawl completed 2026-05-22T10:20:03Z
-```
-
-- Compare `crawl completed …` with `indexed …`: a crawl that completed **after** the
-  index was written means the crawler output has moved on, so run `index` again.
-- `metadata:` counts the pages that carry each value, which is the quickest way to tell
-  whether a filter that matches nothing is a genuine "no such page" or a crawler that
-  never wrote the field. `nested` counts pages below the seed level.
-- `index` never warns about freshness; this report is the only place it surfaces.
-- Both blocks are omitted when the index has nothing to report, so an index built by an
-  earlier version still prints its original summary.
 
 ## JSON for Automation
 
@@ -221,98 +197,6 @@ Rules worth knowing:
   or `default`.
 - The file is optional. Tests and the offline smoke gate pin it to an empty file, so a developer's `config.yaml`
   never changes what the gates observe.
-
-## Query Defaults
-
-A `query` section supplies defaults for retrieval settings, so a corpus-specific choice
-does not have to be repeated on every command line:
-
-```yaml
-query:
-  mode: "hybrid"
-  fusion: "weighted"
-  alpha: 0.70
-  top_k: 10
-  candidate_k: 50
-  expand: 0
-  priors: ["recency", "seed"]
-  prior_strength: 0.15
-  recency_half_life: 90d
-```
-
-| file key | equivalent | notes |
-| --- | --- | --- |
-| `query.mode` | `--mode` | `hybrid`, `lexical` or `vector` |
-| `query.fusion` | `--fusion` | `weighted` or `rrf` |
-| `query.alpha` | `--alpha` | lexical weight for weighted fusion, `0..1` |
-| `query.top_k` | `--top-k` | result count |
-| `query.candidate_k` | `--candidate-k` | candidates per channel |
-| `query.expand` | `--expand` | adjacent-chunk expansion |
-| `query.priors` | `--priors` | list of `recency`, `authority`, `seed`, `depth`, `richness` |
-| `query.prior_strength` | `--prior-strength` | `0..1`; `0` means the built-in default of 0.15 |
-| `query.recency_half_life` | `--recency-half-life` | a duration such as `90d`, `6w` or `12h`; `0s` means the built-in default of 180d |
-
-Rules:
-
-- A flag you pass wins, **including an empty one**: `--priors ""` turns priors off for
-  that query even when the file lists them, and `--mode lexical` overrides a configured
-  mode. The flag replaces the file value, it never merges with it.
-- `--lexical-only` counts as a decision, so a configured `mode` cannot override it.
-- `mode` and `fusion` must match exactly; the accepted values are printed in the error.
-- Zero means "unset" for `prior_strength` and `recency_half_life`, matching how the
-  other numeric settings treat zero.
-- The merged values are echoed in the `request` block of JSON output, so a scripted
-  query shows what it actually ran with.
-- `index` and `stats` ignore this section; it only shapes `query`.
-
-## Metadata Filters
-
-Query filters use the crawler metadata that indexing stores, so they narrow both the
-lexical and the vector channel before ranking:
-
-```sh
-# everything a person wrote or last touched, oldest first in the output
-confluence2md-indexer query --db ./confluence2md-index.db --q "release checklist" --author "Ada Lovelace"
-
-# the seed pages themselves, which are the entry points of a crawl
-confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --seed-only
-
-# pages inside the wiki hierarchy, excluding the seed level
-confluence2md-indexer query --db ./confluence2md-index.db --q "rollback" --depth-min 1 --depth-max 3
-
-# documentation that carries an attachment, changed in the last 90 days
-confluence2md-indexer query --db ./confluence2md-index.db --q "design" --has-attachments --updated-since 90d
-```
-
-Notes:
-
-- Every filter is opt-in; a query without filters behaves exactly as before.
-- `--space` is repeatable, which makes it a multi-space filter.
-- `--updated-since` accepts `30d`, `2w`, `12h`, `90m` and resolves to a timestamp before
-  the query runs, which is echoed in JSON output as `filters.UpdatedSince`.
-- Filters compare stored values, so they can only match what the crawler wrote. `depth`,
-  `host`, `version` and the link lists come from `metadata.json` only.
-- An index built by an earlier version is refused until it is rebuilt once:
-
-  ```sh
-  confluence2md-indexer index ./output --rebuild
-  ```
-
-- A re-crawl that changes metadata but not text is refreshed without re-embedding
-  anything; index output counts those pages under `documents.metadata`.
-
-Ranking can also be nudged by metadata, off by default:
-
-```sh
-confluence2md-indexer query --db ./confluence2md-index.db --q "rotate secrets" --priors recency,authority --explain
-```
-
-`--priors` takes `recency`, `authority`, `seed`, `depth` and `richness`;
-`--prior-strength` (default 0.15) bounds the adjustment and `--recency-half-life`
-(default 180d) sets how fast recency decays. `--explain` shows the factors behind the
-top result.
-
-The full key and behaviour reference is in [metadata.md](metadata.md).
 
 ## CI and Release Notes
 

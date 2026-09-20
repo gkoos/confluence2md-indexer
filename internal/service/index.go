@@ -39,14 +39,11 @@ type IndexResponse struct {
 	CheckedFiles        int
 	Inserted            int
 	Updated             int
-	// MetadataUpdates counts pages whose text was unchanged but whose crawler
-	// metadata moved; they are refreshed without re-embedding anything.
-	MetadataUpdates int
-	Skipped         int
-	Deleted         int
-	ChunkWrites     int
-	RunID           string
-	DBStats         *db.Stats
+	Skipped             int
+	Deleted             int
+	ChunkWrites         int
+	RunID               string
+	DBStats             *db.Stats
 }
 
 func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
@@ -90,7 +87,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index run tracking failed: %w", err)
 	}
 
-	corpus, err := indexer.LoadCorpus(folder, indexer.DefaultChunkSize, indexer.DefaultChunkOverlap)
+	docs, err := indexer.LoadDocuments(folder, indexer.DefaultChunkSize, indexer.DefaultChunkOverlap)
 	if err != nil {
 		return nil, fmt.Errorf("index ingestion failed: %w", err)
 	}
@@ -107,9 +104,9 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		embeddingName = embProvider.Name()
 	}
 
-	var inserted, updated, metadataUpdates, skipped, chunkWrites, embeddingWrites int
-	keepIDs := make([]string, 0, len(corpus.Documents))
-	for _, doc := range corpus.Documents {
+	var inserted, updated, skipped, chunkWrites, embeddingWrites int
+	keepIDs := make([]string, 0, len(docs))
+	for _, doc := range docs {
 		keepIDs = append(keepIDs, doc.ID)
 		docRecord := db.DocumentRecord{
 			ID:             doc.ID,
@@ -120,21 +117,6 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 			SourceURL:      doc.SourceURL,
 			LastModifiedAt: doc.ModifiedAt,
 			ContentHash:    doc.ContentHash,
-			MetadataHash:   doc.MetadataFingerprint(),
-			Host:           doc.Metadata.Host,
-			CanonicalURL:   doc.Metadata.CanonicalURL,
-			Version:        doc.Metadata.Version,
-			Depth:          doc.Metadata.Depth,
-			ParentID:       doc.Metadata.ParentID,
-			CreatedAt:      doc.Metadata.CreatedAt,
-			CrawledAt:      doc.Metadata.CrawledAt,
-			CreatedByName:  doc.Metadata.CreatedByName,
-			ModifiedByName: doc.Metadata.ModifiedByName,
-			IsSeed:         doc.Metadata.IsSeed,
-			LinkIn:         doc.Metadata.LinkIn,
-			LinkOut:        doc.Metadata.LinkOut,
-			Attachments:    doc.Metadata.Attachments,
-			Comments:       doc.Metadata.Comments,
 		}
 		chunkRecords := make([]db.ChunkRecord, 0, len(doc.Chunks))
 		chunkTexts := make([]string, 0, len(doc.Chunks))
@@ -157,8 +139,6 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 			inserted++
 		case "updated":
 			updated++
-		case "metadata":
-			metadataUpdates++
 		case "skipped":
 			skipped++
 		}
@@ -213,20 +193,6 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index run completion failed: %w", err)
 	}
 
-	// Record the crawl the index was built from, so a later report can show how
-	// stale the index is relative to the crawler output.
-	if err := db.RecordCorpusSnapshot(ctx, database, run.ID, db.CorpusSnapshot{
-		RunID:       run.ID,
-		StartedAt:   corpus.Crawl.StartedAt,
-		CompletedAt: corpus.Crawl.CompletedAt,
-		SucceededAt: corpus.Crawl.SucceededAt,
-		Mode:        corpus.Crawl.Mode,
-		SeedCount:   corpus.Crawl.SeedCount,
-		PageCount:   corpus.Crawl.PageCount,
-	}); err != nil {
-		return nil, fmt.Errorf("index corpus snapshot failed: %w", err)
-	}
-
 	dbStats, err := db.GetStats(ctx, database)
 	if err != nil {
 		return nil, fmt.Errorf("index db stats failed: %w", err)
@@ -249,7 +215,6 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		CheckedFiles:        summary.MarkdownChecked,
 		Inserted:            inserted,
 		Updated:             updated,
-		MetadataUpdates:     metadataUpdates,
 		Skipped:             skipped,
 		Deleted:             int(deleted),
 		ChunkWrites:         chunkWrites,
