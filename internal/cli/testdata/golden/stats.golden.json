@@ -5,8 +5,17 @@
   "stats": {
     "chunks": 1,
     "documents": 1,
+    "embeddingModels": [
+      {
+        "chunks": 1,
+        "dimension": 256,
+        "name": "bow-local:fnv1a@256"
+      }
+    ],
     "embeddings": 1,
     "runs": 1,
-    "schemaVersion": 1
+    "vectorCapability": "lexical",
+    "vectorName": "bow-local:fnv1a@256",
+    "vectorReady": true
   }
 }

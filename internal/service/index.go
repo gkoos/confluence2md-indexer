@@ -22,24 +22,27 @@ type IndexRequest struct {
 }
 
 type IndexResponse struct {
-	Status          string
-	Incremental     bool
-	Rebuild         bool
-	DBPath          string
-	EmbeddingName   string
-	EmbeddingSource string
-	EmbeddingWrites int
-	InputFolder     string
-	MetadataPath    string
-	PageCount       int
-	CheckedFiles    int
-	Inserted        int
-	Updated         int
-	Skipped         int
-	Deleted         int
-	ChunkWrites     int
-	RunID           string
-	DBStats         *db.Stats
+	Status              string
+	Incremental         bool
+	Rebuild             bool
+	DBPath              string
+	EmbeddingName       string
+	EmbeddingSource     string
+	EmbeddingWrites     int
+	EmbeddingPruned     int
+	EmbeddingDimension  int
+	EmbeddingCapability string
+	InputFolder         string
+	MetadataPath        string
+	PageCount           int
+	CheckedFiles        int
+	Inserted            int
+	Updated             int
+	Skipped             int
+	Deleted             int
+	ChunkWrites         int
+	RunID               string
+	DBStats             *db.Stats
 }
 
 func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
@@ -93,6 +96,13 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, err
 	}
 
+	// An empty identity tells the store that no vectors are expected, which keeps
+	// the skip decision correct when embeddings are disabled.
+	embeddingName := ""
+	if embProvider.Caps().Enabled() {
+		embeddingName = embProvider.Name()
+	}
+
 	var inserted, updated, skipped, chunkWrites, embeddingWrites int
 	keepIDs := make([]string, 0, len(docs))
 	for _, doc := range docs {
@@ -119,7 +129,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 			chunkTexts = append(chunkTexts, ch.Text)
 		}
 
-		status, written, err := db.UpsertDocumentWithChunks(ctx, database, docRecord, chunkRecords)
+		status, written, err := db.UpsertDocumentWithChunks(ctx, database, docRecord, chunkRecords, embeddingName)
 		if err != nil {
 			return nil, fmt.Errorf("index persistence failed for page %s: %w", doc.PageID, err)
 		}
@@ -145,7 +155,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 				}
 				recs = append(recs, db.EmbeddingRecord{
 					ChunkID:   chunkRecords[i].ID,
-					Model:     embProvider.Name(),
+					Name:      embProvider.Name(),
 					Dimension: len(vec),
 					Vector:    vec,
 				})
@@ -163,6 +173,21 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index stale cleanup failed: %w", err)
 	}
 
+	// Keep a single vector space per index, and record which identity produced it
+	// so query time can detect a mismatch instead of scoring zeros.
+	pruned := 0
+	if embProvider.Caps().Enabled() {
+		removed, err := db.DeleteEmbeddingsNotNamed(ctx, database, embProvider.Name())
+		if err != nil {
+			return nil, fmt.Errorf("index stale embedding cleanup failed: %w", err)
+		}
+		pruned = int(removed)
+
+		if err := db.RecordEmbeddingRun(ctx, database, run.ID, embProvider.Name(), embProvider.Dimension(), embProvider.Caps().Capability()); err != nil {
+			return nil, fmt.Errorf("index embedding run recording failed: %w", err)
+		}
+	}
+
 	if err := db.CompleteRun(ctx, database, run.ID); err != nil {
 		return nil, fmt.Errorf("index run completion failed: %w", err)
 	}
@@ -173,24 +198,27 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	}
 
 	return &IndexResponse{
-		Status:          "phase4-ready",
-		Incremental:     !req.Rebuild,
-		Rebuild:         req.Rebuild,
-		DBPath:          dbPath,
-		EmbeddingName:   embProvider.Name(),
-		EmbeddingSource: embSource,
-		EmbeddingWrites: embeddingWrites,
-		InputFolder:     summary.FolderPath,
-		MetadataPath:    summary.MetadataPath,
-		PageCount:       summary.PageCount,
-		CheckedFiles:    summary.MarkdownChecked,
-		Inserted:        inserted,
-		Updated:         updated,
-		Skipped:         skipped,
-		Deleted:         int(deleted),
-		ChunkWrites:     chunkWrites,
-		RunID:           run.ID,
-		DBStats:         dbStats,
+		Status:              "phase4-ready",
+		Incremental:         !req.Rebuild,
+		Rebuild:             req.Rebuild,
+		DBPath:              dbPath,
+		EmbeddingName:       embProvider.Name(),
+		EmbeddingSource:     embSource,
+		EmbeddingWrites:     embeddingWrites,
+		EmbeddingPruned:     pruned,
+		EmbeddingDimension:  embProvider.Dimension(),
+		EmbeddingCapability: embProvider.Caps().Capability(),
+		InputFolder:         summary.FolderPath,
+		MetadataPath:        summary.MetadataPath,
+		PageCount:           summary.PageCount,
+		CheckedFiles:        summary.MarkdownChecked,
+		Inserted:            inserted,
+		Updated:             updated,
+		Skipped:             skipped,
+		Deleted:             int(deleted),
+		ChunkWrites:         chunkWrites,
+		RunID:               run.ID,
+		DBStats:             dbStats,
 	}, nil
 }
 

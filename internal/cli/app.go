@@ -88,9 +88,12 @@ func (a *App) runIndex(args []string) int {
 			"rebuild":       indexResp.Rebuild,
 			"dbPath":        indexResp.DBPath,
 			"embedding": map[string]any{
-				"provider": indexResp.EmbeddingName,
-				"source":   indexResp.EmbeddingSource,
-				"written":  indexResp.EmbeddingWrites,
+				"provider":   indexResp.EmbeddingName,
+				"source":     indexResp.EmbeddingSource,
+				"written":    indexResp.EmbeddingWrites,
+				"pruned":     indexResp.EmbeddingPruned,
+				"dimension":  indexResp.EmbeddingDimension,
+				"capability": indexResp.EmbeddingCapability,
 			},
 			"inputFolder":  indexResp.InputFolder,
 			"metadataPath": indexResp.MetadataPath,
@@ -112,14 +115,18 @@ func (a *App) runIndex(args []string) int {
 		fmt.Printf("index preflight passed: %d pages, %d markdown files validated\n", indexResp.PageCount, indexResp.CheckedFiles)
 		fmt.Printf("db path: %s\n", indexResp.DBPath)
 		fmt.Printf("run id: %s\n", indexResp.RunID)
-		fmt.Printf("schema version: %d\n", indexResp.DBStats.SchemaVersion)
 		fmt.Printf("runs recorded: %d\n", indexResp.DBStats.Runs)
 		fmt.Printf("documents inserted: %d\n", indexResp.Inserted)
 		fmt.Printf("documents updated: %d\n", indexResp.Updated)
 		fmt.Printf("documents skipped: %d\n", indexResp.Skipped)
 		fmt.Printf("documents deleted: %d\n", indexResp.Deleted)
 		fmt.Printf("chunks written: %d\n", indexResp.ChunkWrites)
-		fmt.Printf("embeddings written: %d (%s; source=%s)\n", indexResp.EmbeddingWrites, indexResp.EmbeddingName, indexResp.EmbeddingSource)
+		fmt.Printf("embeddings written: %d (%s; source=%s, capability=%s, dim=%d)\n",
+			indexResp.EmbeddingWrites, indexResp.EmbeddingName, indexResp.EmbeddingSource,
+			indexResp.EmbeddingCapability, indexResp.EmbeddingDimension)
+		if indexResp.EmbeddingPruned != 0 {
+			fmt.Printf("embeddings pruned: %d\n", indexResp.EmbeddingPruned)
+		}
 		if parsed.rebuild {
 			fmt.Println("mode: full rebuild")
 		} else {
@@ -380,11 +387,17 @@ func (a *App) runStats(args []string) int {
 	}
 
 	fmt.Printf("db path: %s\n", *dbPath)
-	fmt.Printf("schema version: %d\n", stats.SchemaVersion)
 	fmt.Printf("runs: %d\n", stats.Runs)
 	fmt.Printf("documents: %d\n", stats.Documents)
 	fmt.Printf("chunks: %d\n", stats.Chunks)
 	fmt.Printf("embeddings: %d\n", stats.Embeddings)
+	fmt.Printf("vector ready: %t\n", stats.VectorReady)
+	if stats.VectorName != "" {
+		fmt.Printf("embedding identity: %s\n", stats.VectorName)
+	}
+	if stats.VectorCapability != "" {
+		fmt.Printf("vector capability: %s\n", stats.VectorCapability)
+	}
 
 	return exitCodeOK
 }

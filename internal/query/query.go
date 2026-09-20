@@ -78,6 +78,20 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	}
 	req.Filters.Candidate = req.CandidateK
 
+	// Guard the vector channel before using it: comparing a query vector against
+	// vectors from another identity scores zero everywhere and would silently
+	// return "no results" instead of reporting the mismatch.
+	if req.Mode == "vector" || req.Mode == "hybrid" {
+		manifest, err := db.EmbeddingManifest(ctx, database)
+		if err != nil {
+			return nil, 0, fmt.Errorf("query embedding manifest: %w", err)
+		}
+		if err := verifyEmbeddingIdentity(provider, manifest); err != nil {
+			return nil, 0, err
+		}
+		req.Filters.EmbeddingName = provider.Name()
+	}
+
 	var lexical []db.Candidate
 	var vector []db.Candidate
 	var err error
@@ -260,6 +274,13 @@ func normalizeScores(candidates []db.Candidate, selector func(db.Candidate) floa
 	}
 	if max == min {
 		for _, c := range candidates {
+			if max <= 0 {
+				// Every candidate scored zero, so this channel carries no signal.
+				// Reporting 0 (rather than 1) keeps them out of the results
+				// instead of ranking them all equally.
+				out[c.ChunkID] = 0
+				continue
+			}
 			out[c.ChunkID] = 1
 		}
 		return out
@@ -269,6 +290,34 @@ func normalizeScores(candidates []db.Candidate, selector func(db.Candidate) floa
 		out[c.ChunkID] = (v - min) / (max - min)
 	}
 	return out
+}
+
+// verifyEmbeddingIdentity refuses to compare vectors from different spaces. The
+// stored identity is authoritative: a provider mismatch, a missing API key or a
+// re-index with a different model all land here instead of degrading into empty
+// results.
+func verifyEmbeddingIdentity(provider embedding.Provider, manifest *db.Manifest) error {
+	if manifest == nil || manifest.Chunks == 0 {
+		return fmt.Errorf(
+			"the index holds no embeddings to search with %q; re-index with --embedding %s, or query with --mode lexical",
+			provider.Name(), provider.Name(),
+		)
+	}
+
+	if stored := manifest.SingleName(); stored != "" {
+		if stored == provider.Name() {
+			return nil
+		}
+		return fmt.Errorf(
+			"embedding mismatch: index vectors are %q but the configured provider is %q; re-index with --rebuild, select the stored provider, or query with --mode lexical",
+			stored, provider.Name(),
+		)
+	}
+
+	return fmt.Errorf(
+		"index mixes embedding identities %v; re-index with --rebuild to rebuild it for %q",
+		manifest.Names, provider.Name(),
+	)
 }
 
 // requireVectorProvider guards the vector channel. Modes that need embeddings
