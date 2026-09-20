@@ -50,6 +50,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check the pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          # Passed through the environment rather than interpolated, so a title can
+          # never reach the shell as code.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|docs|chore|ci|refactor|test|perf|build|revert)(\([^()]+\))?!?: .+'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            {
+              echo "::error::The pull request title must be a conventional commit."
+              echo "The squash subject becomes the commit message on main, and release-please reads it to decide the next version."
+              echo "Got:      $PR_TITLE"
+              echo "Examples: feat(query): add metadata ranking priors"
+              echo "          fix(indexer): stop reading headings inside fenced code blocks"
+            } >&2
+            exit 1
+          fi
+          echo "Pull request title is a conventional commit: $PR_TITLE"
+
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
