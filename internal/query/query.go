@@ -23,6 +23,9 @@ type Request struct {
 	CandidateK int
 	Expand     int
 	Filters    db.SearchFilters
+	// Embedding configures provider resolution for this query. It is not part of
+	// the request contract: the command or API layer fills it in.
+	Embedding embedding.Options `json:"-"`
 }
 
 type Result struct {

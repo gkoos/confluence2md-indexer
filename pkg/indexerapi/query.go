@@ -32,12 +32,20 @@ func Query(ctx context.Context, dbPath string, req QueryRequest) (*QueryResponse
 	}
 	defer func() { _ = database.Close() }()
 
-	resolution, err := embedding.Resolve(embedding.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("query embedding provider setup failed: %w", err)
+	// Lexical retrieval needs no provider at all, so provider configuration is
+	// only resolved (and validated) for the modes that use vectors. Resolution
+	// errors already name the provider and the setting to fix, so they are
+	// returned unchanged.
+	var provider embedding.Provider
+	if req.Mode == "vector" || req.Mode == "hybrid" {
+		resolution, err := embedding.Resolve(req.Embedding)
+		if err != nil {
+			return nil, err
+		}
+		provider = resolution.Provider
 	}
 
-	results, total, err := query.Run(ctx, database, resolution.Provider, req)
+	results, total, err := query.Run(ctx, database, provider, req)
 	if err != nil {
 		return nil, err
 	}

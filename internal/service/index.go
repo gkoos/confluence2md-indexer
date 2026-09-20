@@ -16,9 +16,10 @@ type IndexRequest struct {
 	DBPath  string
 	Rebuild bool
 	// Provider overrides provider resolution. Tests inject a deterministic
-	// provider here; command paths leave it nil and resolve from flags,
-	// environment and defaults.
+	// provider here; command paths leave it nil and resolve from Embedding.
 	Provider embedding.Provider
+	// Embedding configures provider resolution when Provider is nil.
+	Embedding embedding.Options
 }
 
 type IndexResponse struct {
@@ -91,7 +92,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index ingestion failed: %w", err)
 	}
 
-	embProvider, embSource, err := resolveIndexProvider(req.Provider)
+	embProvider, embSource, err := resolveIndexProvider(req.Provider, req.Embedding)
 	if err != nil {
 		return nil, err
 	}
@@ -224,14 +225,14 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 
 // resolveIndexProvider prefers an injected provider so tests never touch the
 // network, and otherwise resolves one from flags, environment and defaults.
-func resolveIndexProvider(injected embedding.Provider) (embedding.Provider, string, error) {
+func resolveIndexProvider(injected embedding.Provider, options embedding.Options) (embedding.Provider, string, error) {
 	if injected != nil {
 		return injected, "injected", nil
 	}
 
-	resolution, err := embedding.Resolve(embedding.Options{})
+	resolution, err := embedding.Resolve(options)
 	if err != nil {
-		return nil, "", fmt.Errorf("index embedding provider setup failed: %w", err)
+		return nil, "", err
 	}
 	return resolution.Provider, resolution.Source, nil
 }

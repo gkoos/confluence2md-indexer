@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gkoos/confluence2md-indexer/internal/db"
+	"github.com/gkoos/confluence2md-indexer/internal/embedding"
 	"github.com/gkoos/confluence2md-indexer/internal/query"
 	"github.com/gkoos/confluence2md-indexer/internal/service"
 )
@@ -56,13 +57,44 @@ func (a *App) Run(args []string) int {
 }
 
 func (a *App) runIndex(args []string) int {
-	parsed, err := parseIndexArgs(args)
+	fs := flag.NewFlagSet("index", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	dbPathFlag := fs.String("db", "", "Path to the SQLite database file (defaults to the input folder)")
+	rebuild := fs.Bool("rebuild", false, "Recreate the database file before indexing")
+	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON output")
+	skipEmbeddings := fs.Bool("skip-embeddings", false, "Store no embeddings and leave the vector channel empty")
+	embeddingValues := &embeddingFlags{}
+	registerEmbeddingFlags(fs, embeddingValues)
+
+	folders, err := parseInterspersed(fs, args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
 		return exitCodeInvalidUsage
 	}
+	if len(folders) > 1 {
+		fmt.Fprintln(os.Stderr, "index accepts at most one folder argument")
+		return exitCodeInvalidUsage
+	}
 
-	dbPath, err := resolveDBPath(parsed.folder, parsed.dbPathFlag)
+	folder := "."
+	if len(folders) == 1 {
+		folder = folders[0]
+	}
+
+	options, err := embeddingValues.options()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "index: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	options.Skip = options.Skip || *skipEmbeddings
+
+	if isProviderListRequest(options.Provider) {
+		printProviderList(os.Stdout)
+		return exitCodeOK
+	}
+
+	dbPath, err := resolveDBPath(folder, *dbPathFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
 		return exitCodeInvalidUsage
@@ -70,16 +102,17 @@ func (a *App) runIndex(args []string) int {
 
 	ctx := context.Background()
 	indexResp, err := service.Index(ctx, service.IndexRequest{
-		Folder:  parsed.folder,
-		DBPath:  dbPath,
-		Rebuild: parsed.rebuild,
+		Folder:    folder,
+		DBPath:    dbPath,
+		Rebuild:   *rebuild,
+		Embedding: options,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
 		return exitCodeInvalidUsage
 	}
 
-	if parsed.jsonOutput {
+	if *jsonOutput {
 		payload := map[string]any{
 			"schemaVersion": outputSchemaV1,
 			"command":       "index",
@@ -127,7 +160,7 @@ func (a *App) runIndex(args []string) int {
 		if indexResp.EmbeddingPruned != 0 {
 			fmt.Printf("embeddings pruned: %d\n", indexResp.EmbeddingPruned)
 		}
-		if parsed.rebuild {
+		if *rebuild {
 			fmt.Println("mode: full rebuild")
 		} else {
 			fmt.Println("mode: incremental (default)")
@@ -137,52 +170,115 @@ func (a *App) runIndex(args []string) int {
 	return exitCodeOK
 }
 
-type indexArgs struct {
-	folder     string
-	dbPathFlag string
-	rebuild    bool
-	jsonOutput bool
+// embeddingFlags collects the shared embedding flag surface. Every flag maps to
+// one embedding.Options field; environment variables and defaults are applied by
+// embedding.Resolve.
+type embeddingFlags struct {
+	provider    string
+	model       string
+	baseURL     string
+	path        string
+	dimension   int
+	apiKeyEnv   string
+	authHeader  string
+	authScheme  string
+	headers     stringListFlag
+	queryParams stringListFlag
+	docPrefix   string
+	queryPrefix string
+	batchSize   int
+	timeout     time.Duration
+	maxRetries  int
 }
 
-func parseIndexArgs(args []string) (*indexArgs, error) {
-	parsed := &indexArgs{folder: "."}
+// stringListFlag collects repeatable flag values.
+type stringListFlag []string
 
-	for i := 0; i < len(args); i++ {
-		arg := strings.TrimSpace(args[i])
-		if arg == "" {
-			continue
-		}
+func (f *stringListFlag) String() string { return strings.Join(*f, ";") }
 
-		switch {
-		case arg == "--rebuild":
-			parsed.rebuild = true
-		case arg == "--json":
-			parsed.jsonOutput = true
-		case arg == "--db":
-			i++
-			if i >= len(args) {
-				return nil, fmt.Errorf("--db requires a value")
-			}
-			parsed.dbPathFlag = strings.TrimSpace(args[i])
-			if parsed.dbPathFlag == "" {
-				return nil, fmt.Errorf("--db requires a non-empty value")
-			}
-		case strings.HasPrefix(arg, "--db="):
-			parsed.dbPathFlag = strings.TrimSpace(strings.TrimPrefix(arg, "--db="))
-			if parsed.dbPathFlag == "" {
-				return nil, fmt.Errorf("--db requires a non-empty value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return nil, fmt.Errorf("unknown flag %s", arg)
-		default:
-			if parsed.folder != "." {
-				return nil, errors.New("index accepts at most one folder argument")
-			}
-			parsed.folder = arg
-		}
+func (f *stringListFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
+func registerEmbeddingFlags(fs *flag.FlagSet, values *embeddingFlags) {
+	fs.StringVar(&values.provider, "embedding", "", "Embedding provider id; use \"list\" to enumerate providers")
+	fs.StringVar(&values.model, "embedding-model", "", "Provider model name")
+	fs.StringVar(&values.baseURL, "embedding-base-url", "", "Base URL for HTTP providers")
+	fs.StringVar(&values.path, "embedding-path", "", "Embeddings path appended to the base URL")
+	fs.IntVar(&values.dimension, "embedding-dim", 0, "Vector dimension when the model is not known locally")
+	fs.StringVar(&values.apiKeyEnv, "embedding-api-key-env", "", "Name of the environment variable holding the API key")
+	fs.StringVar(&values.authHeader, "embedding-auth-header", "", "Authentication header name (default Authorization)")
+	fs.StringVar(&values.authScheme, "embedding-auth-scheme", "", "Authentication scheme prefix (default Bearer)")
+	fs.Var(&values.headers, "embedding-header", "Extra request header in key=value form; repeatable")
+	fs.Var(&values.queryParams, "embedding-query-param", "Extra query parameter in key=value form; repeatable")
+	fs.StringVar(&values.docPrefix, "embedding-document-prefix", "", "Text prefix applied to indexed text")
+	fs.StringVar(&values.queryPrefix, "embedding-query-prefix", "", "Text prefix applied to query text")
+	fs.IntVar(&values.batchSize, "embedding-batch-size", 0, "Inputs per embedding request")
+	fs.DurationVar(&values.timeout, "embedding-timeout", 0, "Per-request timeout, for example 30s")
+	fs.IntVar(&values.maxRetries, "embedding-max-retries", 0, "Retries after the first attempt; -1 disables retries")
+}
+
+// options converts parsed flags into embedding options.
+func (values *embeddingFlags) options() (embedding.Options, error) {
+	switch {
+	case values.dimension < 0:
+		return embedding.Options{}, errors.New("--embedding-dim must not be negative")
+	case values.batchSize < 0:
+		return embedding.Options{}, errors.New("--embedding-batch-size must not be negative")
+	case values.timeout < 0:
+		return embedding.Options{}, errors.New("--embedding-timeout must not be negative")
+	case values.maxRetries < -1:
+		return embedding.Options{}, errors.New("--embedding-max-retries must be -1, 0 or greater")
 	}
 
-	return parsed, nil
+	return embedding.Options{
+		Provider:    values.provider,
+		Model:       values.model,
+		BaseURL:     values.baseURL,
+		Path:        values.path,
+		Dimension:   values.dimension,
+		APIKeyEnv:   values.apiKeyEnv,
+		AuthHeader:  values.authHeader,
+		AuthScheme:  values.authScheme,
+		Headers:     values.headers,
+		QueryParams: values.queryParams,
+		DocPrefix:   values.docPrefix,
+		QueryPrefix: values.queryPrefix,
+		BatchSize:   values.batchSize,
+		Timeout:     values.timeout,
+		MaxRetries:  values.maxRetries,
+	}, nil
+}
+
+// parseInterspersed parses flags that may appear before or after positional
+// arguments. The standard flag package stops at the first positional argument,
+// which would reject the documented "index <folder> --rebuild --json" form.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	positional := make([]string, 0, 1)
+	remaining := args
+
+	for {
+		if err := fs.Parse(remaining); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return positional, nil
+		}
+		positional = append(positional, rest[0])
+		remaining = rest[1:]
+	}
+}
+
+// isProviderListRequest reports whether the caller asked to enumerate providers
+// using the "list" pseudo-provider.
+func isProviderListRequest(provider string) bool {
+	return strings.EqualFold(strings.TrimSpace(provider), "list")
+}
+
+func printProviderList(out *os.File) {
+	_, _ = fmt.Fprintf(out, "available embedding providers: %s\n", strings.Join(embedding.Available(), ", "))
 }
 
 func (a *App) runQuery(args []string) int {
@@ -206,9 +302,36 @@ func (a *App) runQuery(args []string) int {
 	expand := fs.Int("expand", 0, "Adjacent chunk expansion count")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON results")
 	explain := fs.Bool("explain", false, "Include score breakdown and diagnostics")
+	lexicalOnly := fs.Bool("lexical-only", false, "Force lexical retrieval, requiring no embedding provider")
+	embeddingValues := &embeddingFlags{}
+	registerEmbeddingFlags(fs, embeddingValues)
 
 	if err := fs.Parse(args); err != nil {
 		return exitCodeInvalidUsage
+	}
+
+	modeSet := false
+	fs.Visit(func(visited *flag.Flag) {
+		if visited.Name == "mode" {
+			modeSet = true
+		}
+	})
+	if *lexicalOnly {
+		if modeSet && *mode != "lexical" {
+			fmt.Fprintf(os.Stderr, "query --lexical-only conflicts with --mode %s\n", *mode)
+			return exitCodeInvalidUsage
+		}
+		*mode = "lexical"
+	}
+
+	embeddingOptions, err := embeddingValues.options()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+	if isProviderListRequest(embeddingOptions.Provider) {
+		printProviderList(os.Stdout)
+		return exitCodeOK
 	}
 
 	if *queryText == "" {
@@ -282,6 +405,7 @@ func (a *App) runQuery(args []string) int {
 		Limit:      *limit,
 		CandidateK: *candidateK,
 		Expand:     *expand,
+		Embedding:  embeddingOptions,
 		Filters: db.SearchFilters{
 			SpaceKey: *space,
 			PageID:   *pageID,
@@ -406,11 +530,27 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "confluence2md-indexer - index and query confluence2md output")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Usage:")
-	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--rebuild] [--json]")
-	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--rebuild] [--json] [--skip-embeddings]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--json]")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Indexing defaults to incremental mode; use --rebuild for full rebuild.")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Embedding flags, accepted by index and query:")
+	_, _ = fmt.Fprintln(out, "  --embedding <id>             provider id, or \"list\" to enumerate providers")
+	_, _ = fmt.Fprintln(out, "  --embedding-model <name>     provider model name")
+	_, _ = fmt.Fprintln(out, "  --embedding-base-url <url>   base URL for HTTP providers")
+	_, _ = fmt.Fprintln(out, "  --embedding-path <path>      embeddings path appended to the base URL")
+	_, _ = fmt.Fprintln(out, "  --embedding-dim <n>          vector size when the model is not known locally")
+	_, _ = fmt.Fprintln(out, "  --embedding-api-key-env <V>  name of the variable holding the API key")
+	_, _ = fmt.Fprintln(out, "  --embedding-header k=v       extra request header (repeatable)")
+	_, _ = fmt.Fprintln(out, "  --embedding-query-param k=v  extra query parameter (repeatable)")
+	_, _ = fmt.Fprintln(out, "  --embedding-document-prefix <text> / --embedding-query-prefix <text>")
+	_, _ = fmt.Fprintln(out, "  --embedding-batch-size <n>   --embedding-timeout <dur>   --embedding-max-retries <n>")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Query and index must use the same embedding identity; a mismatch is reported")
+	_, _ = fmt.Fprintln(out, "instead of returning empty results. CONFLUENCE2MD_EMBEDDING_* environment")
+	_, _ = fmt.Fprintln(out, "variables provide the same settings and are overridden by these flags.")
 }
 
 func summarizeText(s string, max int) string {
