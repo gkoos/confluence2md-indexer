@@ -54,13 +54,6 @@ func TestE2EGoldenContracts(t *testing.T) {
 	})
 	assertGoldenJSON(t, "stats.golden.json", statsOut, func(payload map[string]any) {
 		payload["dbPath"] = "<db-path>"
-		// The corpus block reports when this run started, which varies by design.
-		if stats, ok := payload["stats"].(map[string]any); ok {
-			if corpus, ok := stats["corpus"].(map[string]any); ok {
-				corpus["runId"] = "<run-id>"
-				corpus["indexedAt"] = "<indexed-at>"
-			}
-		}
 	})
 }
 

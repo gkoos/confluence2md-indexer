@@ -12,8 +12,6 @@ builds:
     binary: confluence2md-indexer
     env:
       - CGO_ENABLED=0
-    ldflags:
-      - -X main.version={{ .Version }}
     goos:
       - linux
       - darwin

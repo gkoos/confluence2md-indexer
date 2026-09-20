@@ -12,12 +12,6 @@ import (
 // output.
 type commandPayload struct {
 	DBPath    string `json:"dbPath"`
-	Documents struct {
-		Inserted int `json:"inserted"`
-		Updated  int `json:"updated"`
-		Metadata int `json:"metadata"`
-		Skipped  int `json:"skipped"`
-	} `json:"documents"`
 	Embedding struct {
 		Provider string `json:"provider"`
 		Source   string `json:"source"`

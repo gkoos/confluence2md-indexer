@@ -33,30 +33,6 @@ type Config struct {
 type File struct {
 	DB        *DB        `mapstructure:"db"`
 	Embedding *Embedding `mapstructure:"embedding"`
-	// Query holds retrieval defaults for the query command. Every field is optional:
-	// a flag the caller passes wins over the file, so a configured default can always
-	// be overridden or cleared per invocation.
-	Query *Query `mapstructure:"query"`
-}
-
-// Query mirrors the retrieval settings that have both a flag and a sensible default
-// for a corpus. Filters and output options stay on the command line, because they
-// describe one question rather than one corpus.
-type Query struct {
-	// Priors lists the metadata ranking priors to apply; an empty list means none.
-	Priors []string `mapstructure:"priors"`
-	// PriorStrength bounds the prior adjustment; zero means the built-in default.
-	PriorStrength *float64 `mapstructure:"prior_strength"`
-	// RecencyHalfLife is an age such as "90d", "6w" or "12h"; empty means the built-in
-	// default. It is kept as text so the file accepts the same ages as the flag.
-	RecencyHalfLife *string `mapstructure:"recency_half_life"`
-
-	Mode       *string  `mapstructure:"mode"`
-	Fusion     *string  `mapstructure:"fusion"`
-	Alpha      *float64 `mapstructure:"alpha"`
-	TopK       *int     `mapstructure:"top_k"`
-	CandidateK *int     `mapstructure:"candidate_k"`
-	Expand     *int     `mapstructure:"expand"`
 }
 
 // DB holds index storage settings.

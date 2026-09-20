@@ -13,12 +13,6 @@ It covers:
 - `schemaVersion`: string version for machine-readable JSON contracts.
 - `command`: command name (`index`, `query`, `stats`).
 - `dbPath`: resolved path to the SQLite database used for the command.
-- **Data goes to stdout, diagnostics to stderr.** Every command that does work writes
-  its version to stderr first (`confluence2md-indexer <version>`), so stdout stays
-  parseable: `index --json | jq` sees exactly one JSON document.
-- `--version` (also `-v` or the `version` subcommand) prints the bare version to stdout
-  and exits 0, without reading configuration or a database. A build the release pipeline
-  did not stamp reports `dev`.
 
 ## Index Output
 

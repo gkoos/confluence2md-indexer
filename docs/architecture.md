@@ -42,23 +42,19 @@ This keeps one implementation path for command behavior while preserving stable 
    - preflight validation (`indexer.Preflight`)
    - DB open + migrate
    - run tracking (`BeginRun`/`CompleteRun`)
-   - document loading/chunking, including the crawler metadata merge and the heading breadcrumb
-   - document/chunk upsert, which decides between a full rewrite, a metadata-only refresh and a skip
+   - document loading/chunking
+   - document/chunk upsert
    - embedding generation + upsert for changed chunks
-   - corpus snapshot recording and stale document cleanup
+   - stale document cleanup
    - stats readback
-4. CLI renders text or JSON output, including the count of metadata-only refreshes.
+4. CLI renders text or JSON output.
 
 ## Query Command Flow
 
-1. CLI parses query request options, validates flags and resolves any relative age
-   (`--updated-since 30d`) into a timestamp.
+1. CLI parses query request options and validates flags.
 2. CLI calls `service.Query` with typed request.
-3. Service opens DB, verifies the schema version and delegates to `query.Run`.
-4. Query pipeline runs the metadata filters as SQL predicates, the lexical channel
-   (a sanitised FTS5 expression with weighted BM25) and/or the vector channel, then
-   normalises and fuses the surviving candidates, applies the priors the request enabled
-   and adds optional expansion.
+3. Service opens DB and delegates to `query.Run`.
+4. Query pipeline executes lexical/vector/hybrid retrieval and optional expansion.
 5. CLI renders text output, JSON contract, and optional explain diagnostics.
 
 ## Stats Command Flow
@@ -73,19 +69,14 @@ This keeps one implementation path for command behavior while preserving stable 
 SQLite database stores:
 
 - indexing runs and the embedding identity each run recorded
-- documents, including the crawler metadata (host, canonical URL, version, depth,
-  parent, authors, seed flag, link and attachment counts, comment count) and a
-  metadata fingerprint
-- chunks, with their heading breadcrumb
+- documents
+- chunks
 - embeddings, keyed by chunk and embedding identity
-- `chunks_fts`, an FTS5 table over `text`, `title` and `section`; page id and space
-  key are filtered in SQL instead of being indexed
-- corpus snapshots, which record the crawl each run indexed
+- FTS virtual table for lexical search
 
-The schema is versioned through `PRAGMA user_version`. A database stamped with another
-version is refused with a message that names the rebuild command, because a rebuild from
-the crawler output is deterministic and is the only path that fills columns added after
-a page was first indexed. See [metadata.md](metadata.md) for the full model.
+The schema is created when absent and is not versioned: there are no released
+users yet, so a database written by an older build is rebuilt with `--rebuild`
+rather than upgraded in place.
 
 ## Embedding Resolution
 
