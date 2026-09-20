@@ -90,6 +90,156 @@ func TestChunkSectionsGivesEveryPieceTheBreadcrumb(t *testing.T) {
 	}
 }
 
+func TestFenceRunDetection(t *testing.T) {
+	cases := map[string]struct {
+		trim   string
+		char   byte
+		count  int
+		isOpen bool
+	}{
+		"backtick fence":        {"```", '`', 3, true},
+		"fence with info":       {"````sh", '`', 4, true},
+		"tilde fence":           {"~~~", '~', 3, true},
+		"tilde fence with info": {"~~~text", '~', 3, true},
+		"too short":             {"``", 0, 0, false},
+		"inline code":           {"`one`", 0, 0, false},
+		"backtick inside info":  {"```a`b", 0, 0, false},
+		"heading":               {"# Heading", 0, 0, false},
+		"prose":                 {"prose", 0, 0, false},
+		"empty":                 {"", 0, 0, false},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			char, count, ok := fenceRun(tc.trim)
+			if ok != tc.isOpen || char != tc.char || count != tc.count {
+				t.Fatalf("fenceRun(%q) = (%q, %d, %t), want (%q, %d, %t)",
+					tc.trim, char, count, ok, tc.char, tc.count, tc.isOpen)
+			}
+		})
+	}
+}
+
+func TestFenceTrackerFollowsOpenAndClose(t *testing.T) {
+	cases := map[string]struct {
+		lines    []string
+		delimits []bool
+		open     bool
+	}{
+		"opened then closed": {
+			lines:    []string{"```sh", "# not a heading", "```"},
+			delimits: []bool{true, false, true},
+			open:     false,
+		},
+		"content while open": {
+			lines:    []string{"```", "## also code", "# comment"},
+			delimits: []bool{true, false, false},
+			open:     true,
+		},
+		"different marker does not close": {
+			lines:    []string{"```", "~~~", "# still code"},
+			delimits: []bool{true, false, false},
+			open:     true,
+		},
+		"shorter run does not close": {
+			lines:    []string{"````", "```", "# still code"},
+			delimits: []bool{true, false, false},
+			open:     true,
+		},
+		"longer run closes": {
+			lines:    []string{"````", "`````"},
+			delimits: []bool{true, true},
+			open:     false,
+		},
+		"closing fence with text is content": {
+			lines:    []string{"```", "``` end", "# still code"},
+			delimits: []bool{true, false, false},
+			open:     true,
+		},
+		"reopened after closing": {
+			lines:    []string{"```", "```", "# a heading again"},
+			delimits: []bool{true, true, false},
+			open:     false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fence := &fenceTracker{}
+			for i, line := range tc.lines {
+				got := fence.observe(line)
+				if got != tc.delimits[i] {
+					t.Fatalf("observe(%q) = %t, want %t", line, got, tc.delimits[i])
+				}
+			}
+			if fence.open() != tc.open {
+				t.Fatalf("open = %t, want %t", fence.open(), tc.open)
+			}
+		})
+	}
+}
+
+func TestSplitSectionsIgnoresHeadingsInsideFences(t *testing.T) {
+	content := "# Deployment\n\nprose\n\n```sh\n# install steps\nkubectl apply -f deploy.yaml\n```\n\nmore prose\n\n## Rollback\n\nundo\n"
+
+	want := []contentSection{
+		{
+			Text:       "# Deployment\n\nprose\n\n```sh\n# install steps\nkubectl apply -f deploy.yaml\n```\n\nmore prose",
+			Breadcrumb: "Deployment",
+		},
+		{Text: "## Rollback\n\nundo", Breadcrumb: "Deployment > Rollback"},
+	}
+
+	if got := splitSections(content); !reflect.DeepEqual(got, want) {
+		t.Fatalf("sections = %+v, want %+v", got, want)
+	}
+}
+
+func TestSplitSectionsHandlesTildeFences(t *testing.T) {
+	content := "~~~yaml\n# not a heading\nkey: value\n~~~\n\n## Real\n\nx\n"
+
+	want := []contentSection{
+		{Text: "~~~yaml\n# not a heading\nkey: value\n~~~", Breadcrumb: ""},
+		{Text: "## Real\n\nx", Breadcrumb: "Real"},
+	}
+
+	if got := splitSections(content); !reflect.DeepEqual(got, want) {
+		t.Fatalf("sections = %+v, want %+v", got, want)
+	}
+}
+
+func TestSplitSectionsTreatsAnUnclosedFenceAsContent(t *testing.T) {
+	sections := splitSections("# Deployment\n\n```sh\n# still code\n## also code\n")
+
+	if len(sections) != 1 {
+		t.Fatalf("sections = %d, want the unclosed fence to swallow the rest", len(sections))
+	}
+	if sections[0].Breadcrumb != "Deployment" {
+		t.Fatalf("breadcrumb = %q, want %q", sections[0].Breadcrumb, "Deployment")
+	}
+}
+
+func TestLoadDocumentsKeepsCodeBlocksWithTheirSection(t *testing.T) {
+	dir := writeBreadcrumbCorpus(t, "# Deployment\n\nintro\n\n```yaml\n# config\nkey: value\n```\n\n## Rollback\n\nundo\n")
+
+	docs, err := LoadDocuments(dir, DefaultChunkSize, DefaultChunkOverlap)
+	if err != nil {
+		t.Fatalf("load documents: %v", err)
+	}
+	if len(docs) != 1 || len(docs[0].Chunks) != 2 {
+		t.Fatalf("chunks = %d, want the code block and the second section", len(docs[0].Chunks))
+	}
+
+	sections := []string{docs[0].Chunks[0].Section, docs[0].Chunks[1].Section}
+	want := []string{"Deployment", "Deployment > Rollback"}
+	if !reflect.DeepEqual(sections, want) {
+		t.Fatalf("sections = %v, want %v", sections, want)
+	}
+	if !strings.Contains(docs[0].Chunks[0].Text, "# config") {
+		t.Fatalf("chunk text %q, want the code block kept in the text it belongs to", docs[0].Chunks[0].Text)
+	}
+}
+
 func TestParseHeading(t *testing.T) {
 	cases := map[string]struct {
 		line  string

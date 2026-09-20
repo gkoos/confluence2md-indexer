@@ -35,6 +35,7 @@ Use full rebuild when:
 
 - you want to start from an empty database
 - the DB file was written by an older build whose schema predates embedding identity tracking
+- a release changed how pages are chunked, since that shifts stored chunk boundaries
 - index content looks inconsistent
 
 In rebuild mode the DB file is recreated before indexing, so all pages, chunks and

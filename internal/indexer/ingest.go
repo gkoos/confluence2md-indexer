@@ -295,6 +295,7 @@ func splitSections(content string) []contentSection {
 	lines := strings.Split(content, "\n")
 	sections := make([]contentSection, 0, 8)
 	headings := make([]heading, 0, 4)
+	fence := &fenceTracker{}
 	var current []string
 
 	flush := func() {
@@ -309,9 +310,17 @@ func splitSections(content string) []contentSection {
 	}
 
 	for _, line := range lines {
-		if level, title, isHeading := parseHeading(line); isHeading {
-			flush()
-			headings = pushHeading(headings, level, title)
+		// A fenced code block is content, so a '#' inside it must not split the
+		// section or enter the breadcrumb.
+		if fence.observe(line) {
+			current = append(current, line)
+			continue
+		}
+		if !fence.open() {
+			if level, title, isHeading := parseHeading(line); isHeading {
+				flush()
+				headings = pushHeading(headings, level, title)
+			}
 		}
 		current = append(current, line)
 	}
@@ -326,9 +335,83 @@ func splitSections(content string) []contentSection {
 	return sections
 }
 
+// fenceTracker follows fenced code blocks so headings inside them stay content.
+//
+// The rules follow CommonMark closely enough for exported wiki pages: a fence opens
+// with three or more backticks or tildes (indentation of up to three spaces is
+// allowed, which trimming covers) and closes with a run of the same character that is
+// at least as long and carries nothing else. An unclosed fence runs to the end of the
+// document, so its remaining text is never read as headings.
+type fenceTracker struct {
+	// marker is the fence character while a fence is open, and zero otherwise.
+	marker byte
+	// length counts the characters that opened the current fence.
+	length int
+}
+
+// observe feeds one line to the tracker and reports whether the line is a fence
+// delimiter, which is never a heading or a breadcrumb entry.
+func (f *fenceTracker) observe(line string) bool {
+	trim := strings.TrimSpace(line)
+
+	char, count, ok := fenceRun(trim)
+	if !ok {
+		return false
+	}
+
+	if f.marker == 0 {
+		f.marker, f.length = char, count
+		return true
+	}
+	if char != f.marker || count < f.length {
+		return false
+	}
+	// A closing fence holds nothing but the run itself; anything else is content.
+	if strings.TrimSpace(trim[count:]) != "" {
+		return false
+	}
+
+	f.marker, f.length = 0, 0
+	return true
+}
+
+// open reports whether a fence is still running.
+func (f *fenceTracker) open() bool {
+	return f.marker != 0
+}
+
+// fenceRun reports the leading fence run of a trimmed line.
+func fenceRun(trim string) (byte, int, bool) {
+	if trim == "" {
+		return 0, 0, false
+	}
+
+	char := trim[0]
+	if char != '`' && char != '~' {
+		return 0, 0, false
+	}
+
+	count := 0
+	for count < len(trim) && trim[count] == char {
+		count++
+	}
+	if count < 3 {
+		return 0, 0, false
+	}
+	// A backtick fence cannot carry a backtick in its info string, which is what keeps
+	// an inline "```" in prose from opening a block.
+	if char == '`' && strings.ContainsRune(trim[count:], '`') {
+		return 0, 0, false
+	}
+
+	return char, count, true
+}
+
 // parseHeading reports whether a line is an ATX heading and returns its level and
-// title. This keeps the section-splitting rule this package always used: any line
-// whose first non-space character is '#'.
+// title. Callers skip lines inside a fence: this rule alone would read a comment in a
+// code block as a heading. It keeps the section-splitting behaviour this package
+// always used, where any line whose first non-space character is '#' can open a
+// section.
 func parseHeading(line string) (int, string, bool) {
 	trim := strings.TrimSpace(line)
 	if !strings.HasPrefix(trim, "#") {

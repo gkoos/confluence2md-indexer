@@ -72,9 +72,10 @@ Both blocks are omitted when there is nothing to report, and neither appears in 
 output: an indexing run never warns about freshness.
 
 `chunks_fts` indexes `text`, `title` and `section`, where `section` is the heading
-breadcrumb the chunk sits under (`Deployment > Rollback`). Page id and space key are
-**not** indexed: they are filters, and indexing them made a space key match every page
-in that space.
+breadcrumb the chunk sits under (`Deployment > Rollback`). Headings inside fenced code
+blocks are content, so they neither split a section nor enter the breadcrumb. Page id
+and space key are **not** indexed: they are filters, and indexing them made a space key
+match every page in that space.
 
 `metadata_hash` fingerprints every stored metadata value, including the ones that also
 feed the search index (title, space, URL, dates), so a run can distinguish three cases.
