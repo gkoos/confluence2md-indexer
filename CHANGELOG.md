@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.2.0...v0.3.0) (2026-09-20)
+
+
+### Features
+
+* **embedding:** add pluggable embedding providers, embedding flags and an offline vector smoke gate ([0600236](https://github.com/gkoos/confluence2md-indexer/commit/0600236cd32b3e60a03575308877601de167927a))
+
 ## [0.2.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.1.2...v0.2.0) (2026-07-08)
 
 
