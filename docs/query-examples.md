@@ -227,3 +227,51 @@ The payload includes:
 - Unknown provider: `unknown embedding provider "..." (available: bow-local, openai, openai-compatible)`
 - Index and query disagree: `embedding mismatch: index vectors are "..." but the configured provider is "..."`
 - Nothing to search: `the index holds no embeddings to search with "..."`
+# Metadata filter examples
+
+## Search only what a person wrote
+
+```sh
+confluence2md-indexer query --db ./confluence2md-index.db --q "retention policy" --author "Ada Lovelace"
+confluence2md-indexer query --db ./confluence2md-index.db --q "retention policy" --created-by "Ada Lovelace"
+confluence2md-indexer query --db ./confluence2md-index.db --q "retention policy" --modified-by "Grace Hopper"
+```
+
+`--author` matches either role, case-insensitively; `--created-by` and `--modified-by`
+match one role each.
+
+## Walk the crawl structure
+
+```sh
+# seeds only
+confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --seed-only
+
+# one level below the seeds
+confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --depth-min 1 --depth-max 1
+```
+
+## Narrow by content shape and freshness
+
+```sh
+confluence2md-indexer query --db ./confluence2md-index.db --q "design" --has-attachments
+confluence2md-indexer query --db ./confluence2md-index.db --q "design" --updated-since 90d
+confluence2md-indexer query --db ./confluence2md-index.db --q "design" --updated-since 2w --json
+```
+
+## Corpora that span sites
+
+```sh
+confluence2md-indexer query --db ./confluence2md-index.db --q "release notes" --host docs.example.com
+confluence2md-indexer query --db ./confluence2md-index.db --q "release notes" --space OPS --space ENG
+```
+
+## Combine filters with retrieval modes
+
+```sh
+confluence2md-indexer query --db ./confluence2md-index.db --q "rotate secrets" --mode hybrid --fusion rrf \
+  --author "Ada Lovelace" --depth-max 2 --top-k 5 --json --explain
+```
+
+The JSON payload echoes the active filters under `request.filters`, which makes a
+scripted search self-describing.
+

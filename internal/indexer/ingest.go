@@ -14,6 +14,26 @@ const (
 	DefaultChunkOverlap = 200
 )
 
+// Metadata is the crawler metadata stored with a document. Counts are derived from
+// the link and attachment lists the crawler writes; a zero value means the field was
+// not reported, which is why filters built on it are opt-in.
+type Metadata struct {
+	Host           string
+	CanonicalURL   string
+	Version        int
+	Depth          int
+	ParentID       string
+	CreatedAt      string
+	CrawledAt      string
+	CreatedByName  string
+	ModifiedByName string
+	IsSeed         bool
+	LinkIn         int
+	LinkOut        int
+	Attachments    int
+	Comments       int
+}
+
 type DocumentInput struct {
 	ID          string
 	PageID      string
@@ -23,7 +43,33 @@ type DocumentInput struct {
 	SourceURL   string
 	ModifiedAt  string
 	ContentHash string
+	Metadata    Metadata
 	Chunks      []ChunkInput
+}
+
+// MetadataFingerprint identifies every stored metadata value, including the ones
+// that also feed the search index (title, space, URL, dates), so an index run can
+// tell "nothing changed" from "metadata changed" from "content changed".
+func (d DocumentInput) MetadataFingerprint() string {
+	return ContentHash(fmt.Sprintf("%q|%q|%q|%q|%+v", d.Title, d.SpaceKey, d.SourceURL, d.ModifiedAt, d.Metadata))
+}
+
+// CrawlInfo describes the crawl a folder came from, as recorded by the crawler.
+type CrawlInfo struct {
+	StartedAt   string
+	CompletedAt string
+	SucceededAt string
+	Mode        string
+	SeedCount   int
+	PageCount   int
+}
+
+// Corpus is everything one index run reads from a folder.
+type Corpus struct {
+	// Documents holds one entry per page, sorted by page id.
+	Documents []DocumentInput
+	// Crawl captures the crawl that produced the output.
+	Crawl CrawlInfo
 }
 
 type ChunkInput struct {
@@ -31,9 +77,26 @@ type ChunkInput struct {
 	ChunkIndex int
 	Text       string
 	ChunkHash  string
+	// Section is the heading breadcrumb the chunk sits under, for example
+	// "Deployment > Rollback"; it is indexed for matching and is empty for text
+	// above the first heading.
+	Section string
 }
 
+// LoadDocuments returns just the documents, for callers that do not track crawl
+// information.
 func LoadDocuments(folder string, chunkSize int, overlap int) ([]DocumentInput, error) {
+	corpus, err := LoadCorpus(folder, chunkSize, overlap)
+	if err != nil {
+		return nil, err
+	}
+
+	return corpus.Documents, nil
+}
+
+// LoadCorpus reads metadata.json, the markdown files it references, and the crawl
+// information the metadata file carries.
+func LoadCorpus(folder string, chunkSize int, overlap int) (Corpus, error) {
 	if chunkSize <= 0 {
 		chunkSize = DefaultChunkSize
 	}
@@ -46,7 +109,12 @@ func LoadDocuments(folder string, chunkSize int, overlap int) ([]DocumentInput, 
 
 	absFolder, meta, err := loadMetadata(folder)
 	if err != nil {
-		return nil, err
+		return Corpus{}, err
+	}
+
+	seeds := make(map[string]bool, len(meta.SeedPageIDs))
+	for _, id := range meta.SeedPageIDs {
+		seeds[strings.TrimSpace(id)] = true
 	}
 
 	pageIDs := make([]string, 0, len(meta.Pages))
@@ -60,26 +128,28 @@ func LoadDocuments(folder string, chunkSize int, overlap int) ([]DocumentInput, 
 		page := meta.Pages[pageID]
 		localPath := strings.TrimSpace(page.LocalPath)
 		if localPath == "" {
-			return nil, fmt.Errorf("metadata.pages[%s].local_path is empty", pageID)
+			return Corpus{}, fmt.Errorf("metadata.pages[%s].local_path is empty", pageID)
 		}
 
 		mdPath := filepath.Join(absFolder, filepath.FromSlash(localPath))
 		contentBytes, err := os.ReadFile(mdPath)
 		if err != nil {
-			return nil, fmt.Errorf("read markdown file %s: %w", mdPath, err)
+			return Corpus{}, fmt.Errorf("read markdown file %s: %w", mdPath, err)
 		}
 
-		clean := normalizeContent(stripFrontMatter(string(contentBytes)))
+		raw := string(contentBytes)
+		clean := normalizeContent(stripFrontMatter(raw))
 		sections := splitSections(clean)
-		chunkTexts := chunkSections(sections, chunkSize, overlap)
+		drafts := chunkSections(sections, chunkSize, overlap)
 
-		chunks := make([]ChunkInput, 0, len(chunkTexts))
-		for i, text := range chunkTexts {
+		chunks := make([]ChunkInput, 0, len(drafts))
+		for i, draft := range drafts {
 			chunks = append(chunks, ChunkInput{
 				ID:         ChunkID(pageID, i),
 				ChunkIndex: i,
-				Text:       text,
-				ChunkHash:  ContentHash(text),
+				Text:       draft.Text,
+				ChunkHash:  ContentHash(draft.Text),
+				Section:    draft.Section,
 			})
 		}
 
@@ -92,11 +162,74 @@ func LoadDocuments(folder string, chunkSize int, overlap int) ([]DocumentInput, 
 			SourceURL:   strings.TrimSpace(page.SourceURL),
 			ModifiedAt:  strings.TrimSpace(page.LastModifiedAt),
 			ContentHash: ContentHash(clean),
+			Metadata:    mergePageMetadata(pageID, page, parseFrontMatter(raw), seeds),
 			Chunks:      chunks,
 		})
 	}
 
-	return docs, nil
+	return Corpus{
+		Documents: docs,
+		Crawl: CrawlInfo{
+			StartedAt:   strings.TrimSpace(meta.CrawlStartedAt),
+			CompletedAt: strings.TrimSpace(meta.LastCompletedCrawlCompletedAt),
+			SucceededAt: strings.TrimSpace(meta.LastSuccessfulCrawlCompletedAt),
+			Mode:        strings.TrimSpace(meta.LastCompletedCrawlMode),
+			SeedCount:   len(meta.SeedPageIDs),
+			PageCount:   len(docs),
+		},
+	}, nil
+}
+
+// mergePageMetadata combines what metadata.json says about a page with what its front
+// matter says. The JSON wins where both carry a value, because it is the crawler's
+// own record, while front matter fills the gaps it leaves (is_seed, authors,
+// attachments, comment count, created_at) for whatever a page happens to have.
+func mergePageMetadata(pageID string, page pageRecord, front frontMatter, seeds map[string]bool) Metadata {
+	attachments := len(page.Attachments)
+	if attachments == 0 {
+		attachments = len(front.Attachments)
+	}
+
+	comments := page.CommentCount
+	if comments == 0 {
+		comments = front.CommentCount
+	}
+
+	// seed_page_ids is authoritative when the crawler wrote it; a crawler that does
+	// not write it still marks seeds in the front matter.
+	isSeed := seeds[pageID]
+	if len(seeds) == 0 && front.IsSeed != nil {
+		isSeed = *front.IsSeed
+	}
+
+	return Metadata{
+		Host:           strings.TrimSpace(page.Host),
+		CanonicalURL:   firstNonEmptyString(page.CanonicalURL, front.CanonicalURL),
+		Version:        page.Version,
+		Depth:          page.Depth,
+		ParentID:       firstNonEmptyString(page.ConfluenceParentID, front.ConfluenceParentID),
+		CreatedAt:      firstNonEmptyString(page.CreatedAt, front.CreatedAt),
+		CrawledAt:      firstNonEmptyString(page.CrawledAt, front.CrawledAt),
+		CreatedByName:  firstNonEmptyString(page.CreatedByName, front.CreatedBy),
+		ModifiedByName: firstNonEmptyString(page.LastModifiedByName, front.LastModifiedBy),
+		IsSeed:         isSeed,
+		LinkIn:         len(page.IncomingLinks),
+		LinkOut:        len(page.OutgoingLinks),
+		Attachments:    attachments,
+		Comments:       comments,
+	}
+}
+
+// firstNonEmptyString returns the first value that carries something other than
+// whitespace.
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+
+	return ""
 }
 
 func loadMetadata(folder string) (string, metadataFile, error) {
@@ -117,6 +250,7 @@ func loadMetadata(folder string) (string, metadataFile, error) {
 }
 
 func stripFrontMatter(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
 		return content
 	}
@@ -133,69 +267,142 @@ func normalizeContent(content string) string {
 	return strings.TrimSpace(content)
 }
 
-func splitSections(content string) []string {
+// contentSection is one heading-delimited part of a page together with the heading
+// path that leads to it.
+type contentSection struct {
+	Text       string
+	Breadcrumb string
+}
+
+// chunkDraft is one chunk before it is stored, carrying the breadcrumb of the
+// section it came from.
+type chunkDraft struct {
+	Text    string
+	Section string
+}
+
+// heading is one entry of the heading stack a breadcrumb is built from.
+type heading struct {
+	level int
+	title string
+}
+
+func splitSections(content string) []contentSection {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
 
 	lines := strings.Split(content, "\n")
-	sections := make([]string, 0, 8)
+	sections := make([]contentSection, 0, 8)
+	headings := make([]heading, 0, 4)
 	var current []string
 
 	flush := func() {
 		if len(current) == 0 {
 			return
 		}
-		section := strings.TrimSpace(strings.Join(current, "\n"))
-		if section != "" {
-			sections = append(sections, section)
+		text := strings.TrimSpace(strings.Join(current, "\n"))
+		if text != "" {
+			sections = append(sections, contentSection{Text: text, Breadcrumb: breadcrumbOf(headings)})
 		}
 		current = nil
 	}
 
 	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		isHeading := strings.HasPrefix(trim, "#")
-		if isHeading && len(current) > 0 {
+		if level, title, isHeading := parseHeading(line); isHeading {
 			flush()
+			headings = pushHeading(headings, level, title)
 		}
 		current = append(current, line)
 	}
 	flush()
 
 	if len(sections) == 0 {
-		sections = append(sections, strings.TrimSpace(content))
+		if text := strings.TrimSpace(content); text != "" {
+			sections = append(sections, contentSection{Text: text})
+		}
 	}
 
 	return sections
 }
 
-func chunkSections(sections []string, chunkSize int, overlap int) []string {
+// parseHeading reports whether a line is an ATX heading and returns its level and
+// title. This keeps the section-splitting rule this package always used: any line
+// whose first non-space character is '#'.
+func parseHeading(line string) (int, string, bool) {
+	trim := strings.TrimSpace(line)
+	if !strings.HasPrefix(trim, "#") {
+		return 0, "", false
+	}
+
+	level := 0
+	for level < len(trim) && trim[level] == '#' {
+		level++
+	}
+	if level > 6 {
+		level = 6
+	}
+
+	// A title that starts with extra '#' or spaces would read badly in a
+	// breadcrumb, so both are trimmed.
+	title := strings.TrimSpace(trim[level:])
+	title = strings.TrimSpace(strings.TrimLeft(title, "#"))
+
+	return level, title, true
+}
+
+// pushHeading keeps the heading stack in document order: a heading closes every
+// heading at its own level or deeper. A heading without a title closes them too but
+// contributes nothing to the breadcrumb.
+func pushHeading(stack []heading, level int, title string) []heading {
+	for len(stack) > 0 && stack[len(stack)-1].level >= level {
+		stack = stack[:len(stack)-1]
+	}
+	if title == "" {
+		return stack
+	}
+
+	return append(stack, heading{level: level, title: title})
+}
+
+// breadcrumbOf joins the heading stack, for example "Deployment > Rollback".
+func breadcrumbOf(stack []heading) string {
+	titles := make([]string, 0, len(stack))
+	for _, item := range stack {
+		if item.title != "" {
+			titles = append(titles, item.title)
+		}
+	}
+
+	return strings.Join(titles, " > ")
+}
+
+func chunkSections(sections []contentSection, chunkSize int, overlap int) []chunkDraft {
 	if len(sections) == 0 {
 		return nil
 	}
 
-	out := make([]string, 0, len(sections))
+	out := make([]chunkDraft, 0, len(sections))
 	step := chunkSize - overlap
 	if step <= 0 {
 		step = chunkSize
 	}
 
 	for _, section := range sections {
-		text := strings.TrimSpace(section)
+		text := strings.TrimSpace(section.Text)
 		if text == "" {
 			continue
 		}
 		runes := []rune(text)
 		if len(runes) <= chunkSize {
-			out = append(out, text)
+			out = append(out, chunkDraft{Text: text, Section: section.Breadcrumb})
 			continue
 		}
 		for start := 0; start < len(runes); start += step {
 			end := min(start+chunkSize, len(runes))
 			chunk := strings.TrimSpace(string(runes[start:end]))
 			if chunk != "" {
-				out = append(out, chunk)
+				out = append(out, chunkDraft{Text: chunk, Section: section.Breadcrumb})
 			}
 			if end == len(runes) {
 				break

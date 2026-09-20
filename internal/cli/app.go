@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,6 +148,7 @@ func (a *App) runIndex(args []string) int {
 			"documents": map[string]any{
 				"inserted": indexResp.Inserted,
 				"updated":  indexResp.Updated,
+				"metadata": indexResp.MetadataUpdates,
 				"skipped":  indexResp.Skipped,
 				"deleted":  indexResp.Deleted,
 			},
@@ -171,6 +173,9 @@ func (a *App) runIndex(args []string) int {
 			indexResp.EmbeddingCapability, indexResp.EmbeddingDimension)
 		if indexResp.EmbeddingPruned != 0 {
 			fmt.Printf("embeddings pruned: %d\n", indexResp.EmbeddingPruned)
+		}
+		if indexResp.MetadataUpdates != 0 {
+			fmt.Printf("metadata refreshed: %d\n", indexResp.MetadataUpdates)
 		}
 		if *rebuild {
 			fmt.Println("mode: full rebuild")
@@ -383,7 +388,17 @@ func (a *App) runQuery(args []string) int {
 	offset := fs.Int("offset", 0, "Result offset within ranked list")
 	limit := fs.Int("limit", 0, "Result limit after offset (defaults to --top-k)")
 	candidateK := fs.Int("candidate-k", 50, "Candidate count per retrieval channel")
-	space := fs.String("space", "", "Filter by space_key")
+	spaceList := &stringListFlag{}
+	fs.Var(spaceList, "space", "Filter by space_key; repeatable")
+	author := fs.String("author", "", "Filter by creator or last modifier name")
+	createdBy := fs.String("created-by", "", "Filter by creator name")
+	modifiedBy := fs.String("modified-by", "", "Filter by last modifier name")
+	host := fs.String("host", "", "Filter by crawled host")
+	depthMin := fs.Int("depth-min", -1, "Minimum crawl depth; 1 excludes seeds")
+	depthMax := fs.Int("depth-max", -1, "Maximum crawl depth")
+	seedOnly := fs.Bool("seed-only", false, "Keep only the pages the crawl started from")
+	hasAttachments := fs.Bool("has-attachments", false, "Keep only pages that carry an attachment")
+	updatedSince := fs.String("updated-since", "", "Keep pages modified within an age such as 30d, 2w or 12h")
 	pageID := fs.String("page-id", "", "Filter by page_id")
 	fromDate := fs.String("from", "", "Lower bound for last_modified_at (YYYY-MM-DD)")
 	toDate := fs.String("to", "", "Upper bound for last_modified_at (YYYY-MM-DD)")
@@ -474,6 +489,19 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintln(os.Stderr, "query --expand must be >= 0")
 		return exitCodeInvalidUsage
 	}
+	if *depthMin < -1 || *depthMax < -1 {
+		fmt.Fprintln(os.Stderr, "query --depth-min and --depth-max must be >= 0")
+		return exitCodeInvalidUsage
+	}
+	if *depthMin >= 0 && *depthMax >= 0 && *depthMin > *depthMax {
+		fmt.Fprintln(os.Stderr, "query --depth-min must not be greater than --depth-max")
+		return exitCodeInvalidUsage
+	}
+	updatedSinceValue, err := parseUpdatedSince(*updatedSince, time.Now().UTC())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		return exitCodeInvalidUsage
+	}
 	if _, err := parseOptionalDate("--from", *fromDate); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		return exitCodeInvalidUsage
@@ -503,10 +531,20 @@ func (a *App) runQuery(args []string) int {
 		Expand:     *expand,
 		Embedding:  embeddingOptions,
 		Filters: db.SearchFilters{
-			SpaceKey: *space,
-			PageID:   *pageID,
-			FromDate: *fromDate,
-			ToDate:   *toDate,
+			SpaceKey:       firstSpace(*spaceList),
+			Spaces:         []string(*spaceList),
+			PageID:         *pageID,
+			FromDate:       *fromDate,
+			ToDate:         *toDate,
+			Host:           *host,
+			Author:         *author,
+			CreatedBy:      *createdBy,
+			ModifiedBy:     *modifiedBy,
+			DepthMin:       optionalDepth(*depthMin),
+			DepthMax:       optionalDepth(*depthMax),
+			SeedOnly:       *seedOnly,
+			HasAttachments: *hasAttachments,
+			UpdatedSince:   updatedSinceValue,
 		},
 	}
 
@@ -638,6 +676,17 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--config file] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--config file] [--json]")
 	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Metadata filters, accepted by query (metadata comes from the crawler output):")
+	_, _ = fmt.Fprintln(out, "  --space <key>                space_key, repeatable")
+	_, _ = fmt.Fprintln(out, "  --page-id <id>               single page")
+	_, _ = fmt.Fprintln(out, "  --host <host>                crawled host, for corpora that span sites")
+	_, _ = fmt.Fprintln(out, "  --author <name>              creator or last modifier, case-insensitive")
+	_, _ = fmt.Fprintln(out, "  --created-by <name>          creator only           --modified-by <name>  last modifier only")
+	_, _ = fmt.Fprintln(out, "  --depth-min N --depth-max N  crawl depth range; 1 excludes seed pages")
+	_, _ = fmt.Fprintln(out, "  --seed-only                  only the pages the crawl started from")
+	_, _ = fmt.Fprintln(out, "  --has-attachments            only pages that carry an attachment")
+	_, _ = fmt.Fprintln(out, "  --from/--to YYYY-MM-DD       last_modified_at bounds   --updated-since 30d|2w|12h")
+	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Indexing defaults to incremental mode; use --rebuild for full rebuild.")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Embedding flags, accepted by index and query:")
@@ -661,6 +710,72 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "A setting resolves from the flag you pass, then the CONFLUENCE2MD_EMBEDDING_*")
 	_, _ = fmt.Fprintln(out, "environment variable, then the configuration file, then the built-in default.")
+}
+
+// firstSpace returns the first value that carries something other than whitespace. It
+// keeps the single-valued SpaceKey field populated for callers that still read it
+// while Spaces carries the whole list.
+func firstSpace(values []string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+
+	return ""
+}
+
+// optionalDepth turns the -1 sentinel of the depth flags into "unbounded".
+func optionalDepth(value int) *int {
+	if value < 0 {
+		return nil
+	}
+
+	return &value
+}
+
+// parseUpdatedSince turns a relative age into the absolute lower bound the SQL
+// comparison needs. Days and weeks are accepted next to Go durations, because
+// "--updated-since 30d" is what an operator reaches for.
+func parseUpdatedSince(value string, now time.Time) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+
+	if amount, unit, ok := splitAmountUnit(trimmed); ok {
+		switch unit {
+		case "d", "day", "days":
+			return now.AddDate(0, 0, -amount).Format(time.RFC3339), nil
+		case "w", "week", "weeks":
+			return now.AddDate(0, 0, -7*amount).Format(time.RFC3339), nil
+		}
+	}
+
+	duration, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return "", errors.New("query --updated-since must be an age such as 30d, 2w or 12h")
+	}
+
+	return now.Add(-duration).Format(time.RFC3339), nil
+}
+
+// splitAmountUnit splits a leading integer from a unit suffix ("30d" -> 30 and "d").
+func splitAmountUnit(value string) (int, string, bool) {
+	digits := 0
+	for digits < len(value) && value[digits] >= '0' && value[digits] <= '9' {
+		digits++
+	}
+	if digits == 0 || digits == len(value) {
+		return 0, "", false
+	}
+
+	amount, err := strconv.Atoi(value[:digits])
+	if err != nil {
+		return 0, "", false
+	}
+
+	return amount, strings.TrimSpace(strings.ToLower(value[digits:])), true
 }
 
 func summarizeText(s string, max int) string {

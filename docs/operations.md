@@ -198,6 +198,44 @@ Rules worth knowing:
 - The file is optional. Tests and the offline smoke gate pin it to an empty file, so a developer's `config.yaml`
   never changes what the gates observe.
 
+## Metadata Filters
+
+Query filters use the crawler metadata that indexing stores, so they narrow both the
+lexical and the vector channel before ranking:
+
+```sh
+# everything a person wrote or last touched, oldest first in the output
+confluence2md-indexer query --db ./confluence2md-index.db --q "release checklist" --author "Ada Lovelace"
+
+# the seed pages themselves, which are the entry points of a crawl
+confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --seed-only
+
+# pages inside the wiki hierarchy, excluding the seed level
+confluence2md-indexer query --db ./confluence2md-index.db --q "rollback" --depth-min 1 --depth-max 3
+
+# documentation that carries an attachment, changed in the last 90 days
+confluence2md-indexer query --db ./confluence2md-index.db --q "design" --has-attachments --updated-since 90d
+```
+
+Notes:
+
+- Every filter is opt-in; a query without filters behaves exactly as before.
+- `--space` is repeatable, which makes it a multi-space filter.
+- `--updated-since` accepts `30d`, `2w`, `12h`, `90m` and resolves to a timestamp before
+  the query runs, which is echoed in JSON output as `filters.UpdatedSince`.
+- Filters compare stored values, so they can only match what the crawler wrote. `depth`,
+  `host`, `version` and the link lists come from `metadata.json` only.
+- An index built by an earlier version is refused until it is rebuilt once:
+
+  ```sh
+  confluence2md-indexer index ./output --rebuild
+  ```
+
+- A re-crawl that changes metadata but not text is refreshed without re-embedding
+  anything; index output counts those pages under `documents.metadata`.
+
+The full key and behaviour reference is in [metadata.md](metadata.md).
+
 ## CI and Release Notes
 
 - CI enforces minimum coverage via `task coverage:check`

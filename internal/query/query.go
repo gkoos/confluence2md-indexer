@@ -165,6 +165,13 @@ func applyExpansion(ctx context.Context, database *sql.DB, results []Result, exp
 }
 
 func fuse(req Request, lexical, vector []db.Candidate) []Result {
+	// A channel only speaks when it scored something: both BM25 (negated, so higher
+	// is better) and cosine similarity treat zero as "no signal". Filtering here,
+	// on the raw score, keeps the weakest real match, which min-max normalisation
+	// maps to exactly zero and the previous version then dropped.
+	lexical = withSignal(lexical, func(c db.Candidate) float64 { return c.LexicalScoreRaw })
+	vector = withSignal(vector, func(c db.Candidate) float64 { return c.VectorScoreRaw })
+
 	lexNorm := normalizeScores(lexical, func(c db.Candidate) float64 { return c.LexicalScoreRaw })
 	vecNorm := normalizeScores(vector, func(c db.Candidate) float64 { return c.VectorScoreRaw })
 
@@ -218,9 +225,6 @@ func fuse(req Request, lexical, vector []db.Candidate) []Result {
 
 	out := make([]Result, 0, len(combined))
 	for _, r := range combined {
-		if r.Fused <= 0 {
-			continue
-		}
 		out = append(out, *r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -247,6 +251,19 @@ func rrf(req Request, lexical, vector []db.Candidate, combined map[string]*Resul
 		r.Fused = score
 		r.Fusion = "rrf"
 	}
+}
+
+// withSignal keeps the candidates a channel actually scored, dropping the rows it
+// returned with no similarity at all.
+func withSignal(candidates []db.Candidate, selector func(db.Candidate) float64) []db.Candidate {
+	kept := make([]db.Candidate, 0, len(candidates))
+	for _, c := range candidates {
+		if selector(c) > 0 {
+			kept = append(kept, c)
+		}
+	}
+
+	return kept
 }
 
 func rankMap(candidates []db.Candidate) map[string]int {

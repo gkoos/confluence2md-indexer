@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/spf13/viper v1.21.0
+	go.yaml.in/yaml/v3 v3.0.4
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	modernc.org/libc v1.37.6 // indirect

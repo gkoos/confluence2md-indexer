@@ -92,7 +92,10 @@ confluence2md-indexer query --q text
   [--fusion weighted|rrf] [--alpha 0..1] [--rrf-k N]
   [--top-k N] [--candidate-k N]
   [--offset N] [--limit N]
-  [--space key] [--page-id id] [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+  [--space key] [--host host] [--page-id id]
+  [--author name] [--created-by name] [--modified-by name]
+  [--depth-min N] [--depth-max N] [--seed-only] [--has-attachments]
+  [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--updated-since 30d]
   [--expand N]
   [--json] [--explain] [--lexical-only]
   [--embedding id] [--embedding-model name] [--embedding-base-url url]
@@ -106,6 +109,12 @@ confluence2md-indexer stats [--db path] [--config file] [--json]
 
 Use `--embedding list` to print the available providers. Index and query must be
 given the same embedding settings; see [docs/embedding-providers.md](docs/embedding-providers.md).
+
+The crawler metadata is indexed too, so a query can be narrowed by what it describes:
+`--author`, `--created-by`, `--modified-by`, `--host`, repeated `--space`, `--depth-min`
+and `--depth-max`, `--seed-only`, `--has-attachments` and `--updated-since 30d`. All of
+them are opt-in, and all of them apply to every retrieval mode. Details and examples:
+[docs/metadata.md](docs/metadata.md).
 
 See [docs/query-examples.md](docs/query-examples.md) for practical command patterns.
 
@@ -355,7 +364,8 @@ Release and CI behavior:
 - [Output reference](docs/output-reference.md)
 - [Architecture and data flow](docs/architecture.md)
 - [Operations and troubleshooting](docs/operations.md)
-- [Metadata-driven search improvements](docs/metadata-search-improvements.md)
+- [Metadata fields, filters and indexing](docs/metadata.md)
+- [Metadata-driven search improvements](docs/metadata-search-improvements.md) (open work)
 - [Support matrix](docs/support-matrix.md)
 - [MCP integration decision](docs/mcp-integration-decision.md)
 

@@ -24,6 +24,11 @@ func Stats(ctx context.Context, dbPath string) (*StatsResponse, error) {
 	}
 	defer func() { _ = database.Close() }()
 
+	// Report a schema this build cannot read before touching any table.
+	if err := db.Verify(ctx, database); err != nil {
+		return nil, err
+	}
+
 	stats, err := db.GetStats(ctx, database)
 	if err != nil {
 		return nil, err
