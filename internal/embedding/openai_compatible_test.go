@@ -149,6 +149,29 @@ func TestOpenAICompatibleIdentityAndCaps(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleDeclaresDimensionWithoutRequestingIt(t *testing.T) {
+	rec := newRecorder()
+
+	server := newWireTestServer(t, 4, func(w http.ResponseWriter, r *http.Request, request wireRequest) bool {
+		rec.recordDimensions(request.Dimensions)
+		return false
+	})
+	provider := newCompatibleTestProvider(t, server.URL, nil)
+
+	if _, err := provider.Embed(context.Background(), KindDocument, []string{"alpha"}); err != nil {
+		t.Fatalf("embed failed: %v", err)
+	}
+
+	// A configured dimension declares what to expect from responses; it must not
+	// be sent as a truncation request to an endpoint that may not support it.
+	if got := rec.string("dimensions"); got != "none" {
+		t.Fatalf("expected no dimensions field for a compatible endpoint, got %q", got)
+	}
+	if provider.Dimension() != 4 {
+		t.Fatalf("expected the declared dimension to be kept, got %d", provider.Dimension())
+	}
+}
+
 func TestOpenAICompatibleIsRegistered(t *testing.T) {
 	if !containsString(Available(), ProviderOpenAICompatible) {
 		t.Fatalf("expected %q in %v", ProviderOpenAICompatible, Available())

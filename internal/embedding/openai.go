@@ -54,6 +54,10 @@ type wireDefaults struct {
 	requireDimension bool
 	// requireKey makes an API key mandatory for every request.
 	requireKey bool
+	// sendDimensionParam requests truncated vectors through the dimensions field.
+	// Only endpoints that document that parameter may set this: for the others a
+	// configured dimension is a declaration that is validated, not a request.
+	sendDimensionParam bool
 }
 
 type headerPair struct {
@@ -62,22 +66,22 @@ type headerPair struct {
 }
 
 type openAIProvider struct {
-	identity    string
-	model       string
-	dim         int
-	dimOverride bool
-	baseURL     string
-	path        string
-	queryParams []headerPair
-	headers     []headerPair
-	apiKey      string
-	authHeader  string
-	authScheme  string
-	docPrefix   string
-	queryPrefix string
-	caps        Caps
-	client      *http.Client
-	batch       *batchEmbedder
+	identity       string
+	model          string
+	dim            int
+	sendDimensions bool
+	baseURL        string
+	path           string
+	queryParams    []headerPair
+	headers        []headerPair
+	apiKey         string
+	authHeader     string
+	authScheme     string
+	docPrefix      string
+	queryPrefix    string
+	caps           Caps
+	client         *http.Client
+	batch          *batchEmbedder
 }
 
 // newOpenAIWireProvider builds a provider that speaks the OpenAI embeddings
@@ -102,6 +106,11 @@ func newOpenAIWireProvider(opts Options, defaults wireDefaults) (*openAIProvider
 	dim, dimOverride, err := resolveWireDimension(opts, defaults, model)
 	if err != nil {
 		return nil, err
+	}
+	if !defaults.sendDimensionParam {
+		// The endpoint does not document a dimensions parameter, so the configured
+		// dimension only declares what to expect from responses.
+		dimOverride = false
 	}
 
 	headers, err := parsePairList(opts.Headers, "header")
@@ -151,18 +160,18 @@ func newOpenAIWireProvider(opts Options, defaults wireDefaults) (*openAIProvider
 	}
 
 	provider := &openAIProvider{
-		model:       model,
-		dim:         dim,
-		dimOverride: dimOverride,
-		baseURL:     baseURL,
-		path:        path,
-		queryParams: queryParams,
-		headers:     headers,
-		apiKey:      apiKey,
-		authHeader:  authHeader,
-		authScheme:  authScheme,
-		docPrefix:   opts.DocPrefix,
-		queryPrefix: opts.QueryPrefix,
+		model:          model,
+		dim:            dim,
+		sendDimensions: dimOverride,
+		baseURL:        baseURL,
+		path:           path,
+		queryParams:    queryParams,
+		headers:        headers,
+		apiKey:         apiKey,
+		authHeader:     authHeader,
+		authScheme:     authScheme,
+		docPrefix:      opts.DocPrefix,
+		queryPrefix:    opts.QueryPrefix,
 		caps: Caps{
 			Semantic:       true,
 			Asymmetric:     strings.TrimSpace(opts.DocPrefix) != "" || strings.TrimSpace(opts.QueryPrefix) != "",
@@ -291,7 +300,7 @@ func (p *openAIProvider) doRequest(ctx context.Context, texts []string) ([][]flo
 		"input":           texts,
 		"encoding_format": "float",
 	}
-	if p.dimOverride {
+	if p.sendDimensions {
 		body["dimensions"] = p.dim
 	}
 
@@ -425,6 +434,8 @@ func newOpenAIProvider(opts Options) (Provider, error) {
 		maxBatch:        openAIMaxBatch,
 		maxInputTokens:  openAIMaxInputTokens,
 		requireKey:      true,
+		// OpenAI's v3 models accept a dimensions field for shortened vectors.
+		sendDimensionParam: true,
 	})
 }
 

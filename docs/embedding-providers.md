@@ -110,6 +110,15 @@ confluence2md-indexer index ./output \
   --embedding-api-key-env SILICONFLOW_API_KEY
 ```
 
+`--embedding-dim` here **declares** the model's vector size: it is validated against every response, and it is not sent to the endpoint, because a given server may not accept a `dimensions` parameter. Truncating a model to fewer dimensions (Matryoshka) is therefore only available through the `openai` provider, whose v3 models document that parameter.
+
+Hosted catalogs differ per site. SiliconFlow, for example, serves `BAAI/*` models on `api.siliconflow.cn` but only `Qwen/Qwen3-Embedding-*` on `api.siliconflow.com`, and keys are issued per site. List what your key can actually reach before choosing a model:
+
+```sh
+curl -sS <base-url>/models -H "Authorization: Bearer $SILICONFLOW_API_KEY" \
+  | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | sed -E 's/.*"([^"]+)"$/\1/' | sort
+```
+
 ### Keyless local servers
 
 Ollama, LM Studio, llama.cpp server, vLLM and LocalAI need no API key, and no auth header is sent when none is configured:
@@ -169,7 +178,7 @@ Every flag has an environment variable twin, `CONFLUENCE2MD_EMBEDDING_<NAME>`, a
 | `--embedding-model` | `MODEL` | model name |
 | `--embedding-base-url` | `BASE_URL` | base URL for HTTP providers |
 | `--embedding-path` | `PATH` | path appended to the base URL (default `/embeddings`) |
-| `--embedding-dim` | `DIM` | vector size |
+| `--embedding-dim` | `DIM` | vector size; required for `openai-compatible`, and sent as a request parameter only by the `openai` provider |
 | `--embedding-api-key-env` | `API_KEY_ENV` | name of the variable holding the API key |
 | `--embedding-auth-header` | `AUTH_HEADER` | auth header name (default `Authorization`) |
 | `--embedding-auth-scheme` | `AUTH_SCHEME` | auth scheme (default `Bearer`; `none` sends a raw key) |

@@ -314,6 +314,9 @@ func TestWireProviderDoesNotRetryClientErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "bad model") || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("expected an actionable client error, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "after 1 attempt") {
+		t.Fatalf("expected the error to report one attempt, got %v", err)
+	}
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("expected a single attempt, got %d", got)
 	}

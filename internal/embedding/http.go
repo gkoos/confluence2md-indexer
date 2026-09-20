@@ -98,8 +98,11 @@ func (e *batchEmbedder) embedBatch(ctx context.Context, texts []string) ([][]flo
 		attempts = 1
 	}
 
+	attemptsMade := 0
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
+		attemptsMade++
+
 		vectors, retryAfter, err := e.request(ctx, texts)
 		if err == nil {
 			return vectors, nil
@@ -117,7 +120,9 @@ func (e *batchEmbedder) embedBatch(ctx context.Context, texts []string) ([][]flo
 		}
 	}
 
-	return nil, fmt.Errorf("embedding request failed after %d attempt(s): %w", attempts, lastErr)
+	// Report attempts actually made: a permanent failure such as a 401 is not
+	// retried, and claiming the configured maximum would mislead the caller.
+	return nil, fmt.Errorf("embedding request failed after %d attempt(s): %w", attemptsMade, lastErr)
 }
 
 // permanentError marks a failure that retrying cannot fix, such as a malformed
