@@ -45,7 +45,31 @@ why `--depth-min 1` is the documented way to exclude seed pages.
 (case-insensitive).
 
 `corpus_snapshot` records the crawl each run indexed: start/completion timestamps, its
-mode, and the seed and page counts. Reporting those values in `stats` is still pending.
+mode, and the seed and page counts. `stats` reports the most recent one next to a
+metadata coverage summary; `index` stays silent about it.
+
+### Freshness and coverage
+
+`stats` answers two questions about an index:
+
+- **How stale is it?** The `corpus` block reports the crawl the index was built from
+  (`crawlMode`, `crawlStartedAt`, `crawlCompletedAt`, `crawlSucceededAt`, `seedCount`,
+  `pageCount`) beside `indexedAt`, the moment the indexing run started. A
+  `crawlCompletedAt` later than `indexedAt` means the corpus moved on after the index was
+  written, so re-run `index`.
+- **How much metadata does it hold?** The `metadata` block counts the pages carrying each
+  value: `withAuthors`, `withLinks`, `withAttachments`, `withComments`, `seeds`, `nested`
+  (pages below the seed level) and the number of distinct `hosts`. Zero means "none, or
+  the crawler did not report it", so compare the counts with the crawler output before
+  reading anything into a filter that matches nothing.
+
+```text
+metadata: authors=3 links=0 attachments=2 comments=0 seeds=1 nested=2 hosts=2
+corpus: mode=updates pages=3 seeds=1 indexed 2026-09-20T19:04:13Z crawl completed 2026-05-22T10:20:03Z
+```
+
+Both blocks are omitted when there is nothing to report, and neither appears in `index`
+output: an indexing run never warns about freshness.
 
 `chunks_fts` indexes `text`, `title` and `section`, where `section` is the heading
 breadcrumb the chunk sits under (`Deployment > Rollback`). Page id and space key are

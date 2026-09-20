@@ -34,5 +34,19 @@ func Stats(ctx context.Context, dbPath string) (*StatsResponse, error) {
 		return nil, err
 	}
 
+	// Crawl freshness and metadata coverage belong to this report: index output stays
+	// lean, and the stats command is where an operator looks for them.
+	coverage, err := db.DocumentMetadataCoverage(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	stats.Metadata = coverage
+
+	snapshot, err := db.LatestCorpusSnapshot(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	stats.Corpus = snapshot
+
 	return &StatsResponse{Stats: stats}, nil
 }

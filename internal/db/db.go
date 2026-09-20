@@ -164,6 +164,28 @@ type Stats struct {
 	VectorCapability string `json:"vectorCapability"`
 	// EmbeddingModels lists the distinct identities and sizes present.
 	EmbeddingModels []EmbeddingModelStat `json:"embeddingModels"`
+	// Metadata counts what the stored documents carry, so an operator can see whether
+	// the crawler output actually provided it.
+	Metadata *MetadataCoverage `json:"metadata,omitempty"`
+	// Corpus reports the crawl the index was built from, when a run recorded one.
+	Corpus *CorpusSnapshot `json:"corpus,omitempty"`
+}
+
+// MetadataCoverage counts the documents that carry a metadata value.
+//
+// Zero means "none, or not reported": a crawler that does not write a field leaves it
+// empty, so these are counts rather than availability percentages.
+type MetadataCoverage struct {
+	Documents       int `json:"documents"`
+	WithAuthors     int `json:"withAuthors"`
+	WithLinks       int `json:"withLinks"`
+	WithAttachments int `json:"withAttachments"`
+	WithComments    int `json:"withComments"`
+	Seeds           int `json:"seeds"`
+	// Nested counts pages below the seed level, which is the only depth distinction the
+	// stored value supports: depth zero is a seed, or a crawler that reported nothing.
+	Nested int `json:"nested"`
+	Hosts  int `json:"hosts"`
 }
 
 // EmbeddingModelStat counts stored vectors per identity.
@@ -242,6 +264,9 @@ type CorpusSnapshot struct {
 	Mode        string `json:"crawlMode"`
 	SeedCount   int    `json:"seedCount"`
 	PageCount   int    `json:"pageCount"`
+	// IndexedAt is when the run behind this snapshot started. It is filled when the
+	// snapshot is read from an index and empty when one is being recorded.
+	IndexedAt string `json:"indexedAt,omitempty"`
 }
 
 type ChunkRecord struct {
@@ -646,6 +671,78 @@ func GetStats(ctx context.Context, database *sql.DB) (*Stats, error) {
 	stats.VectorCapability = manifest.Capability
 
 	return stats, nil
+}
+
+// DocumentMetadataCoverage aggregates the crawler metadata the index holds.
+func DocumentMetadataCoverage(ctx context.Context, database *sql.DB) (*MetadataCoverage, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+
+	const q = `
+SELECT COUNT(*),
+  COALESCE(SUM(CASE WHEN created_by_name != '' OR modified_by_name != '' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN link_in > 0 OR link_out > 0 THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN attachment_count > 0 THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN comment_count > 0 THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN is_seed = 1 THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN depth > 0 THEN 1 ELSE 0 END), 0),
+  COUNT(DISTINCT CASE WHEN host != '' THEN host END)
+FROM documents`
+
+	coverage := &MetadataCoverage{}
+	if err := database.QueryRowContext(ctx, q).Scan(
+		&coverage.Documents,
+		&coverage.WithAuthors,
+		&coverage.WithLinks,
+		&coverage.WithAttachments,
+		&coverage.WithComments,
+		&coverage.Seeds,
+		&coverage.Nested,
+		&coverage.Hosts,
+	); err != nil {
+		return nil, fmt.Errorf("query metadata coverage: %w", err)
+	}
+
+	return coverage, nil
+}
+
+// LatestCorpusSnapshot returns the crawl of the most recent index run that recorded
+// one, and nil when no run did. The reported IndexedAt is when that run started, which
+// is what makes staleness comparable: a crawl completed after the index was written
+// means the corpus has moved on since.
+func LatestCorpusSnapshot(ctx context.Context, database *sql.DB) (*CorpusSnapshot, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+
+	const q = `
+SELECT s.run_id, s.crawl_started_at, s.crawl_completed_at, s.crawl_succeeded_at, s.crawl_mode,
+       s.seed_count, s.page_count, r.started_at
+FROM corpus_snapshot s
+JOIN runs r ON r.id = s.run_id
+ORDER BY r.started_at DESC, s.updated_at DESC
+LIMIT 1`
+
+	snapshot := &CorpusSnapshot{}
+	err := database.QueryRowContext(ctx, q).Scan(
+		&snapshot.RunID,
+		&snapshot.StartedAt,
+		&snapshot.CompletedAt,
+		&snapshot.SucceededAt,
+		&snapshot.Mode,
+		&snapshot.SeedCount,
+		&snapshot.PageCount,
+		&snapshot.IndexedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query latest corpus snapshot: %w", err)
+	}
+
+	return snapshot, nil
 }
 
 // EmbeddingManifest reports which embeddings are stored so callers can detect

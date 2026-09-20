@@ -143,6 +143,9 @@ func writeFilterCorpus(t *testing.T, dir string) {
 	}
 
 	metadata := `{
+  "crawl_started_at": "2026-05-22T10:00:00Z",
+  "last_completed_crawl_completed_at": "2026-05-22T10:20:03Z",
+  "last_completed_crawl_mode": "updates",
   "seed_page_ids": ["1"],
   "pages": {
     ` + page("1", "OPS", "a.test", 0, "Ada Lovelace", "Ada Lovelace", `"design.pdf"`, "2026-05-20T10:00:00Z") + `,
@@ -371,6 +374,89 @@ func TestQueryPriorsReorderResultsAndExplainThemselves(t *testing.T) {
 		if !strings.Contains(explain, want) {
 			t.Fatalf("explain output %q, want it to mention %q", explain, want)
 		}
+	}
+}
+
+func TestStatsReportsMetadataCoverageAndCrawl(t *testing.T) {
+	app := newTestApp(t)
+	dbPath := indexedFilterCorpus(t, app)
+
+	text := captureStdout(t, func() {
+		if exit := app.Run([]string{"stats", "--db", dbPath}); exit != exitCodeOK {
+			t.Fatalf("stats exit code: %d", exit)
+		}
+	})
+	for _, want := range []string{
+		"metadata: authors=3 links=0 attachments=2 comments=0 seeds=1 nested=2 hosts=2",
+		"corpus: mode=updates pages=3 seeds=1",
+		"crawl completed 2026-05-22T10:20:03Z",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("stats output %q, want it to mention %q", text, want)
+		}
+	}
+
+	var payload struct {
+		Stats struct {
+			Metadata struct {
+				Documents       int `json:"documents"`
+				WithAuthors     int `json:"withAuthors"`
+				WithAttachments int `json:"withAttachments"`
+				Seeds           int `json:"seeds"`
+				Hosts           int `json:"hosts"`
+			} `json:"metadata"`
+			Corpus struct {
+				Mode        string `json:"crawlMode"`
+				SeedCount   int    `json:"seedCount"`
+				PageCount   int    `json:"pageCount"`
+				CompletedAt string `json:"crawlCompletedAt"`
+				IndexedAt   string `json:"indexedAt"`
+			} `json:"corpus"`
+		} `json:"stats"`
+	}
+	raw := captureStdout(t, func() {
+		if exit := app.Run([]string{"stats", "--db", dbPath, "--json"}); exit != exitCodeOK {
+			t.Fatalf("stats --json exit code: %d", exit)
+		}
+	})
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode stats output %q: %v", raw, err)
+	}
+
+	if payload.Stats.Metadata.Documents != 3 || payload.Stats.Metadata.WithAuthors != 3 {
+		t.Fatalf("metadata = %+v, want the indexed pages counted", payload.Stats.Metadata)
+	}
+	if payload.Stats.Metadata.WithAttachments != 2 || payload.Stats.Metadata.Seeds != 1 || payload.Stats.Metadata.Hosts != 2 {
+		t.Fatalf("metadata = %+v, want the attachments, seeds and hosts counted", payload.Stats.Metadata)
+	}
+	if payload.Stats.Corpus.Mode != "updates" || payload.Stats.Corpus.PageCount != 3 || payload.Stats.Corpus.SeedCount != 1 {
+		t.Fatalf("corpus = %+v, want the crawl the index was built from", payload.Stats.Corpus)
+	}
+	if payload.Stats.Corpus.IndexedAt == "" {
+		t.Fatal("IndexedAt must be reported, so an operator can compare it with the crawl timestamps")
+	}
+}
+
+func TestStatsOmitsCoverageAndCrawlWithoutData(t *testing.T) {
+	app := newTestApp(t)
+	dir := writeIndexFixture(t, "# Doc\n\nbody text\n")
+	dbPath := filepath.Join(t.TempDir(), "index.db")
+
+	captureStdout(t, func() {
+		if exit := app.Run([]string{"index", dir, "--db", dbPath, "--json"}); exit != exitCodeOK {
+			t.Fatalf("index exit code: %d", exit)
+		}
+	})
+
+	// The fixture carries no crawler metadata and no crawl timestamps, so the coverage
+	// block is empty and the corpus block reports only what the run knew.
+	raw := captureStdout(t, func() {
+		if exit := app.Run([]string{"stats", "--db", dbPath, "--json"}); exit != exitCodeOK {
+			t.Fatalf("stats exit code: %d", exit)
+		}
+	})
+	if !strings.Contains(raw, `"metadata"`) || !strings.Contains(raw, `"corpus"`) {
+		t.Fatalf("stats output %q, want both blocks present", raw)
 	}
 }
 

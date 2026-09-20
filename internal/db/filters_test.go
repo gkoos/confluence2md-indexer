@@ -144,6 +144,94 @@ func TestSearchVectorNarrowsByMetadata(t *testing.T) {
 	}
 }
 
+func TestDocumentMetadataCoverageCountsStoredValues(t *testing.T) {
+	database := newTestDatabase(t)
+	seedFilterCorpus(t, database)
+
+	// A page with links and no author exercises the remaining branches.
+	seedSearchDocument(t, database, DocumentRecord{
+		ID: "4", PageID: "4", Title: "Linked page", LocalPath: "4.md", SpaceKey: "OPS",
+		SourceURL: "https://a.test/4", LastModifiedAt: "2026-06-01T10:00:00Z",
+		ContentHash: "h-4", MetadataHash: "m-4", LinkIn: 3, LinkOut: 1,
+	}, ChunkRecord{ID: "4:000000", ChunkIndex: 0, Text: "shared term", ChunkHash: "c-4"})
+
+	coverage, err := DocumentMetadataCoverage(context.Background(), database)
+	if err != nil {
+		t.Fatalf("coverage: %v", err)
+	}
+
+	want := MetadataCoverage{
+		Documents:       4,
+		WithAuthors:     3,
+		WithLinks:       1,
+		WithAttachments: 2,
+		WithComments:    0,
+		Seeds:           1,
+		Nested:          2,
+		Hosts:           2,
+	}
+	if *coverage != want {
+		t.Fatalf("coverage = %+v, want %+v", *coverage, want)
+	}
+}
+
+func TestLatestCorpusSnapshotReportsTheNewestRun(t *testing.T) {
+	database := newTestDatabase(t)
+	ctx := context.Background()
+
+	snapshot, err := LatestCorpusSnapshot(ctx, database)
+	if err != nil {
+		t.Fatalf("latest snapshot: %v", err)
+	}
+	if snapshot != nil {
+		t.Fatalf("snapshot = %+v, want nil before any run records one", snapshot)
+	}
+
+	first, err := BeginRun(ctx, database, "rebuild")
+	if err != nil {
+		t.Fatalf("begin first run: %v", err)
+	}
+	if err := RecordCorpusSnapshot(ctx, database, first.ID, CorpusSnapshot{
+		StartedAt: "2026-05-01T10:00:00Z", PageCount: 3, Mode: "full",
+	}); err != nil {
+		t.Fatalf("record first snapshot: %v", err)
+	}
+	if err := CompleteRun(ctx, database, first.ID); err != nil {
+		t.Fatalf("complete first run: %v", err)
+	}
+
+	second, err := BeginRun(ctx, database, "incremental")
+	if err != nil {
+		t.Fatalf("begin second run: %v", err)
+	}
+	if err := RecordCorpusSnapshot(ctx, database, second.ID, CorpusSnapshot{
+		StartedAt:   "2026-06-01T10:00:00Z",
+		CompletedAt: "2026-06-01T10:05:00Z",
+		PageCount:   5,
+		SeedCount:   2,
+		Mode:        "updates",
+	}); err != nil {
+		t.Fatalf("record second snapshot: %v", err)
+	}
+	if err := CompleteRun(ctx, database, second.ID); err != nil {
+		t.Fatalf("complete second run: %v", err)
+	}
+
+	latest, err := LatestCorpusSnapshot(ctx, database)
+	if err != nil {
+		t.Fatalf("latest snapshot: %v", err)
+	}
+	if latest == nil {
+		t.Fatal("expected the most recent snapshot")
+	}
+	if latest.RunID != second.ID || latest.PageCount != 5 || latest.Mode != "updates" {
+		t.Fatalf("snapshot = %+v, want the second run's crawl", latest)
+	}
+	if latest.IndexedAt == "" {
+		t.Fatal("IndexedAt must report when the run started, so staleness is comparable")
+	}
+}
+
 func TestFilterClausesIgnoresBlankValues(t *testing.T) {
 	where, args := filterClauses(SearchFilters{SpaceKey: "  ", Spaces: []string{"", " "}, Author: " ", Host: "\t"})
 

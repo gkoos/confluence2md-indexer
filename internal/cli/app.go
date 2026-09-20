@@ -727,6 +727,38 @@ func (a *App) runStats(args []string) int {
 	if stats.VectorCapability != "" {
 		fmt.Printf("vector capability: %s\n", stats.VectorCapability)
 	}
+	if stats.Metadata != nil {
+		fmt.Printf(
+			"metadata: authors=%d links=%d attachments=%d comments=%d seeds=%d nested=%d hosts=%d\n",
+			stats.Metadata.WithAuthors,
+			stats.Metadata.WithLinks,
+			stats.Metadata.WithAttachments,
+			stats.Metadata.WithComments,
+			stats.Metadata.Seeds,
+			stats.Metadata.Nested,
+			stats.Metadata.Hosts,
+		)
+	}
+	if stats.Corpus != nil {
+		parts := make([]string, 0, 6)
+		if stats.Corpus.Mode != "" {
+			parts = append(parts, "mode="+stats.Corpus.Mode)
+		}
+		parts = append(parts,
+			fmt.Sprintf("pages=%d", stats.Corpus.PageCount),
+			fmt.Sprintf("seeds=%d", stats.Corpus.SeedCount),
+		)
+		if stats.Corpus.IndexedAt != "" {
+			parts = append(parts, "indexed "+stats.Corpus.IndexedAt)
+		}
+		if stats.Corpus.CompletedAt != "" {
+			parts = append(parts, "crawl completed "+stats.Corpus.CompletedAt)
+		}
+		if stats.Corpus.SucceededAt != "" {
+			parts = append(parts, "last successful crawl "+stats.Corpus.SucceededAt)
+		}
+		fmt.Printf("corpus: %s\n", strings.Join(parts, " "))
+	}
 
 	return exitCodeOK
 }

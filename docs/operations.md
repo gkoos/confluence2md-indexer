@@ -44,6 +44,29 @@ embeddings are written from scratch. This is destructive to the DB file at that 
 confluence2md-indexer index ./output --rebuild
 ```
 
+## Index Freshness and Coverage
+
+`stats` reports the crawl an index was built from, so staleness is visible without
+guessing:
+
+```sh
+confluence2md-indexer stats --db ./confluence2md-index.db
+```
+
+```text
+metadata: authors=3 links=0 attachments=2 comments=0 seeds=1 nested=2 hosts=2
+corpus: mode=updates pages=3 seeds=1 indexed 2026-09-20T19:04:13Z crawl completed 2026-05-22T10:20:03Z
+```
+
+- Compare `crawl completed …` with `indexed …`: a crawl that completed **after** the
+  index was written means the crawler output has moved on, so run `index` again.
+- `metadata:` counts the pages that carry each value, which is the quickest way to tell
+  whether a filter that matches nothing is a genuine "no such page" or a crawler that
+  never wrote the field. `nested` counts pages below the seed level.
+- `index` never warns about freshness; this report is the only place it surfaces.
+- Both blocks are omitted when the index has nothing to report, so an index built by an
+  earlier version still prints its original summary.
+
 ## JSON for Automation
 
 Prefer `--json` for scripts and pipelines:
