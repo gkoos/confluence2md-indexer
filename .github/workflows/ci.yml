@@ -5,6 +5,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    # govulncheck reads a live vulnerability database, so a green main can go
+    # stale without any commit: the Go 1.26.9 stdlib advisories (2026-10-08)
+    # only surface on the next push. Re-check weekly.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
