@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2](https://github.com/gkoos/confluence2md-indexer/compare/v0.5.1...v0.5.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* **indexer:** require a space after # for headings ([#43](https://github.com/gkoos/confluence2md-indexer/issues/43)) ([20a26b4](https://github.com/gkoos/confluence2md-indexer/commit/20a26b4f9e8900db9f1e8f1b0a7b5f33cf53c6f2)), closes [#25](https://github.com/gkoos/confluence2md-indexer/issues/25)
+
 ## [0.5.1](https://github.com/gkoos/confluence2md-indexer/compare/v0.5.0...v0.5.1) (2026-10-20)
 
 
