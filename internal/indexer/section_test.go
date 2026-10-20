@@ -219,6 +219,91 @@ func TestSplitSectionsTreatsAnUnclosedFenceAsContent(t *testing.T) {
 	}
 }
 
+func TestSplitSectionsIgnoresHashesWithoutASpace(t *testing.T) {
+	content := "#hashtag\n\nbody\n\n#TODO: x\n\nmore\n\n## Real\n\nx\n"
+
+	want := []contentSection{
+		{Text: "#hashtag\n\nbody\n\n#TODO: x\n\nmore", Breadcrumb: ""},
+		{Text: "## Real\n\nx", Breadcrumb: "Real"},
+	}
+
+	if got := splitSections(content); !reflect.DeepEqual(got, want) {
+		t.Fatalf("sections = %+v, want %+v", got, want)
+	}
+}
+
+func TestSplitSectionsIgnoresIndentedCodeHashes(t *testing.T) {
+	content := "intro\n\n    # indented\n\nbody\n\n\t# tab indented\n\n## Real\n\nx\n"
+
+	want := []contentSection{
+		{Text: "intro\n\n    # indented\n\nbody\n\n\t# tab indented", Breadcrumb: ""},
+		{Text: "## Real\n\nx", Breadcrumb: "Real"},
+	}
+
+	if got := splitSections(content); !reflect.DeepEqual(got, want) {
+		t.Fatalf("sections = %+v, want %+v", got, want)
+	}
+}
+
+func TestLoadDocumentsKeepsProseThatOnlyLooksLikeAHeading(t *testing.T) {
+	dir := writeBreadcrumbCorpus(t, "#hashtag\n\nbody\n\n#TODO: x\n\nmore\n\n    # indented\n")
+
+	docs, err := LoadDocuments(dir, DefaultChunkSize, DefaultChunkOverlap)
+	if err != nil {
+		t.Fatalf("load documents: %v", err)
+	}
+	if len(docs) != 1 || len(docs[0].Chunks) != 1 {
+		t.Fatalf("documents/chunks = %d/%d, want the whole page in one section", len(docs), len(docs[0].Chunks))
+	}
+
+	chunk := docs[0].Chunks[0]
+	if chunk.Section != "" {
+		t.Fatalf("section = %q, want no breadcrumb from prose", chunk.Section)
+	}
+	if want := ChunkID(docs[0].PageID, 0); chunk.ID != want {
+		t.Fatalf("chunk id = %q, want %q", chunk.ID, want)
+	}
+	for _, text := range []string{"#hashtag", "#TODO: x", "    # indented"} {
+		if !strings.Contains(chunk.Text, text) {
+			t.Fatalf("chunk text %q, want %q kept as content", chunk.Text, text)
+		}
+	}
+}
+
+func TestLoadDocumentsKeepsAnIndentedFirstLineAsContent(t *testing.T) {
+	// normalizeContent runs before section splitting, so it must not eat the
+	// indentation of the first non-blank line; otherwise indented code at the top
+	// of a page becomes a heading and a breadcrumb.
+	cases := map[string]string{
+		"four spaces":        "    # indented\n\nbody\n",
+		"tab":                "\t# indented\n\nbody\n",
+		"after front matter": "---\npage_id: \"1\"\n---\n\n    # indented\n\nbody\n",
+	}
+
+	for name, markdown := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := writeBreadcrumbCorpus(t, markdown)
+
+			docs, err := LoadDocuments(dir, DefaultChunkSize, DefaultChunkOverlap)
+			if err != nil {
+				t.Fatalf("load documents: %v", err)
+			}
+			if len(docs) != 1 || len(docs[0].Chunks) != 1 {
+				t.Fatalf("documents/chunks = %d/%d, want one section", len(docs), len(docs[0].Chunks))
+			}
+			if section := docs[0].Chunks[0].Section; section != "" {
+				t.Fatalf("section = %q, want no breadcrumb from indented code", section)
+			}
+		})
+	}
+}
+
+func TestNormalizeContentKeepsFirstLineIndentation(t *testing.T) {
+	if got, want := normalizeContent("\n\n    # indented\n\nbody\n\n"), "    # indented\n\nbody"; got != want {
+		t.Fatalf("normalizeContent = %q, want %q", got, want)
+	}
+}
+
 func TestLoadDocumentsKeepsCodeBlocksWithTheirSection(t *testing.T) {
 	dir := writeBreadcrumbCorpus(t, "# Deployment\n\nintro\n\n```yaml\n# config\nkey: value\n```\n\n## Rollback\n\nundo\n")
 
@@ -247,13 +332,19 @@ func TestParseHeading(t *testing.T) {
 		title string
 		ok    bool
 	}{
-		"h1":             {"# Deployment", 1, "Deployment", true},
-		"h3 with spaces": {"###   Rollback  ", 3, "Rollback", true},
-		"h6":             {"###### deep", 6, "deep", true},
-		"deeper than h6": {"####### seven", 6, "seven", true},
-		"bare hash":      {"#", 1, "", true},
-		"body text":      {"text # not a heading", 0, "", false},
-		"empty":          {"", 0, "", false},
+		"h1":                 {"# Deployment", 1, "Deployment", true},
+		"h3 with spaces":     {"###   Rollback  ", 3, "Rollback", true},
+		"h6":                 {"###### deep", 6, "deep", true},
+		"bare hash":          {"#", 1, "", true},
+		"tab after hashes":   {"#\tTabbed", 1, "Tabbed", true},
+		"three-space indent": {"   # tight", 1, "tight", true},
+		"no space after #":   {"#TODO: x", 0, "", false},
+		"hashtag":            {"#hashtag", 0, "", false},
+		"indented code":      {"    # indented", 0, "", false},
+		"tab indented":       {"\t# indented", 0, "", false},
+		"too many hashes":    {"####### seven", 0, "", false},
+		"body text":          {"text # not a heading", 0, "", false},
+		"empty":              {"", 0, "", false},
 	}
 
 	for name, tc := range cases {
