@@ -42,7 +42,7 @@ func TestLoadCorpusReadsCrawlerMetadata(t *testing.T) {
       "last_modified_at": "2026-05-20T10:00:00Z",
       "source_url": "https://org.test/wiki/pages/1",
       "canonical_url": "https://org.test/wiki/spaces/OPS/pages/1/Deployment",
-      "confluence_parent_id": "99",
+      "confluence_parent_id": 99,
       "created_by_name": "Ada Lovelace",
       "last_modified_by_name": "Grace Hopper",
       "outgoing_links": ["org.test/2", "org.test/3"],
@@ -87,6 +87,23 @@ func TestLoadCorpusReadsCrawlerMetadata(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("metadata = %+v, want %+v", got, want)
+	}
+}
+
+func TestLoadCorpusAcceptsQuotedParentID(t *testing.T) {
+	// The crawler writes the identifier as a JSON number; older exports and
+	// hand-written fixtures quote it. Both shapes must yield the same stored value,
+	// so a representation change cannot make an export unindexable.
+	metadata := `{"pages":{"org.test/1":{"id":"org.test/1","local_path":"page.md","title":"Deployment",` +
+		`"source_url":"https://org.test/1","confluence_parent_id":"99"}}}`
+
+	corpus, err := LoadCorpus(writeMetadataCorpus(t, metadata, "# Deployment\n\nbody\n"), DefaultChunkSize, DefaultChunkOverlap)
+	if err != nil {
+		t.Fatalf("load corpus: %v", err)
+	}
+
+	if got := corpus.Documents[0].Metadata.ParentID; got != "99" {
+		t.Fatalf("parent id = %q, want %q", got, "99")
 	}
 }
 
