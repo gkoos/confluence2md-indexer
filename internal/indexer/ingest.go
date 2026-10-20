@@ -262,9 +262,12 @@ func stripFrontMatter(content string) string {
 	return content[start:]
 }
 
+// normalizeContent canonicalises line endings and drops blank edge lines. It must
+// not trim leading spaces: heading detection runs on the result, and an indented
+// '#' line at the top of a page is code, not a heading.
 func normalizeContent(content string) string {
 	content = strings.ReplaceAll(content, "\r\n", "\n")
-	return strings.TrimSpace(content)
+	return strings.Trim(content, "\n")
 }
 
 // contentSection is one heading-delimited part of a page together with the heading

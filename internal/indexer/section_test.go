@@ -270,6 +270,40 @@ func TestLoadDocumentsKeepsProseThatOnlyLooksLikeAHeading(t *testing.T) {
 	}
 }
 
+func TestLoadDocumentsKeepsAnIndentedFirstLineAsContent(t *testing.T) {
+	// normalizeContent runs before section splitting, so it must not eat the
+	// indentation of the first non-blank line; otherwise indented code at the top
+	// of a page becomes a heading and a breadcrumb.
+	cases := map[string]string{
+		"four spaces":        "    # indented\n\nbody\n",
+		"tab":                "\t# indented\n\nbody\n",
+		"after front matter": "---\npage_id: \"1\"\n---\n\n    # indented\n\nbody\n",
+	}
+
+	for name, markdown := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := writeBreadcrumbCorpus(t, markdown)
+
+			docs, err := LoadDocuments(dir, DefaultChunkSize, DefaultChunkOverlap)
+			if err != nil {
+				t.Fatalf("load documents: %v", err)
+			}
+			if len(docs) != 1 || len(docs[0].Chunks) != 1 {
+				t.Fatalf("documents/chunks = %d/%d, want one section", len(docs), len(docs[0].Chunks))
+			}
+			if section := docs[0].Chunks[0].Section; section != "" {
+				t.Fatalf("section = %q, want no breadcrumb from indented code", section)
+			}
+		})
+	}
+}
+
+func TestNormalizeContentKeepsFirstLineIndentation(t *testing.T) {
+	if got, want := normalizeContent("\n\n    # indented\n\nbody\n\n"), "    # indented\n\nbody"; got != want {
+		t.Fatalf("normalizeContent = %q, want %q", got, want)
+	}
+}
+
 func TestLoadDocumentsKeepsCodeBlocksWithTheirSection(t *testing.T) {
 	dir := writeBreadcrumbCorpus(t, "# Deployment\n\nintro\n\n```yaml\n# config\nkey: value\n```\n\n## Rollback\n\nundo\n")
 
