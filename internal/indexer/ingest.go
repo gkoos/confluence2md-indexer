@@ -408,27 +408,41 @@ func fenceRun(trim string) (byte, int, bool) {
 }
 
 // parseHeading reports whether a line is an ATX heading and returns its level and
-// title. Callers skip lines inside a fence: this rule alone would read a comment in a
-// code block as a heading. It keeps the section-splitting behaviour this package
-// always used, where any line whose first non-space character is '#' can open a
-// section.
+// title. It follows CommonMark: at most three leading spaces, one to six '#', then
+// a space, a tab or the end of the line. Four columns of indentation start an
+// indented code block and seven or more '#' is a paragraph, so neither opens a
+// section. Callers still skip lines inside a fence, which this rule cannot see.
 func parseHeading(line string) (int, string, bool) {
-	trim := strings.TrimSpace(line)
-	if !strings.HasPrefix(trim, "#") {
+	indent := 0
+	for indent < len(line) && (line[indent] == ' ' || line[indent] == '\t') {
+		if line[indent] == '\t' {
+			indent += 4 - indent%4
+		} else {
+			indent++
+		}
+		if indent > 3 {
+			return 0, "", false
+		}
+	}
+
+	rest := line[indent:]
+	level := 0
+	for level < len(rest) && rest[level] == '#' {
+		level++
+	}
+	if level == 0 || level > 6 {
 		return 0, "", false
 	}
 
-	level := 0
-	for level < len(trim) && trim[level] == '#' {
-		level++
-	}
-	if level > 6 {
-		level = 6
+	// The hashes must be followed by a space, a tab or the end of the line, so
+	// "#TODO" and "#hashtag" stay prose instead of opening a section.
+	if level < len(rest) && rest[level] != ' ' && rest[level] != '\t' {
+		return 0, "", false
 	}
 
 	// A title that starts with extra '#' or spaces would read badly in a
 	// breadcrumb, so both are trimmed.
-	title := strings.TrimSpace(trim[level:])
+	title := strings.TrimSpace(rest[level:])
 	title = strings.TrimSpace(strings.TrimLeft(title, "#"))
 
 	return level, title, true

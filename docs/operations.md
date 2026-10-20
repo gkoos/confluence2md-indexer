@@ -38,6 +38,13 @@ Use full rebuild when:
 - a release changed how pages are chunked, since that shifts stored chunk boundaries
 - index content looks inconsistent
 
+Heading detection follows CommonMark since this release: a section starts only at one to
+six `#` followed by a space, a tab or the end of the line, indented at most three
+spaces. Pages containing `#hashtag`-style prose, `#TODO:` markers or indented `#` lines
+used to split into extra sections and now do not, so their chunk boundaries shift.
+Incremental indexing cannot notice that on its own when a page's chunk count happens to
+stay the same, so re-run indexing with `--rebuild` once after upgrading.
+
 In rebuild mode the DB file is recreated before indexing, so all pages, chunks and
 embeddings are written from scratch. This is destructive to the DB file at that path.
 
