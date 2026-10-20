@@ -207,7 +207,7 @@ func mergePageMetadata(pageID string, page pageRecord, front frontMatter, seeds 
 		CanonicalURL:   firstNonEmptyString(page.CanonicalURL, front.CanonicalURL),
 		Version:        page.Version,
 		Depth:          page.Depth,
-		ParentID:       firstNonEmptyString(page.ConfluenceParentID, front.ConfluenceParentID),
+		ParentID:       firstNonEmptyString(page.ConfluenceParentID.String(), front.ConfluenceParentID),
 		CreatedAt:      firstNonEmptyString(page.CreatedAt, front.CreatedAt),
 		CrawledAt:      firstNonEmptyString(page.CrawledAt, front.CrawledAt),
 		CreatedByName:  firstNonEmptyString(page.CreatedByName, front.CreatedBy),

@@ -37,7 +37,7 @@ type pageRecord struct {
 	LastModifiedAt     string   `json:"last_modified_at"`
 	SourceURL          string   `json:"source_url"`
 	CanonicalURL       string   `json:"canonical_url"`
-	ConfluenceParentID string   `json:"confluence_parent_id"`
+	ConfluenceParentID pageID   `json:"confluence_parent_id"`
 	CreatedByName      string   `json:"created_by_name"`
 	LastModifiedByName string   `json:"last_modified_by_name"`
 	OutgoingLinks      []string `json:"outgoing_links"`
