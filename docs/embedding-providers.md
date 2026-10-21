@@ -25,11 +25,12 @@ bow-local:fnv1a@256
 openai:text-embedding-3-small@1536
 openai-compatible:BAAI/bge-m3@1024+endpoint:cef65c52
 openai-compatible:bge-m3@1024+endpoint:cef65c52+prefixes:5e6f7a8b
+openai:text-embedding-3-small@1536+ctx:title,space
 ```
 
 The identity is stored with every vector in the index, and command output reports it as `embedding identity` (`stats`) or `embedding.provider` (index JSON).
 
-Only settings that change the vector space appear in it: model, dimension, endpoint and text prefixes. Operational settings such as batch size, timeout and retry count are deliberately excluded, so tuning them does not invalidate an existing index. Endpoints are stored as a short hash rather than in full, because gateway URLs sometimes carry credentials.
+Only settings that change the vector space appear in it: model, dimension, endpoint, text prefixes and the document context header. Operational settings such as batch size, timeout and retry count are deliberately excluded, so tuning them does not invalidate an existing index. Endpoints are stored as a short hash rather than in full, because gateway URLs sometimes carry credentials.
 
 ### Capabilities
 
@@ -169,6 +170,41 @@ Models such as `nomic-embed-text`, E5 and some bge variants expect different tex
 
 Prefixes are part of the identity, so index and query must be given the same values.
 
+### Document context header
+
+A short chunk can lose the page it came from before it reaches the model. Indexing can
+prepend a header built from the page metadata, for the document text only:
+
+```sh
+confluence2md-indexer index ./output --embedding-context title,space,section
+```
+
+```text
+title: Deployment runbook
+space: SRE
+section: Deployment > Rollback
+
+<chunk text, unchanged>
+```
+
+Pick any subset; dimensions come out in the order above regardless of how you name them.
+Empty values are skipped, so a page above the first heading gets the lines it has. Query
+text is never decorated, and the stored chunk text is never changed, so retrieval still
+returns what the crawler wrote.
+
+The selection is part of the identity (`+ctx:title,space,section`), which has three
+consequences:
+
+- index and query must use the same selection, exactly like prefixes; otherwise the
+  mismatch guard refuses the query,
+- changing it makes the next `index` re-embed the whole corpus and prune the vectors of
+  the previous selection, which costs provider calls but needs no `--rebuild`,
+- leaving it empty costs nobody anything: the identity and the embedded text are exactly
+  what they were before this option existed.
+
+A header adds tokens to every chunk, so a very long title with a small per-request limit
+is worth watching.
+
 ### Not covered
 
 A server with a different wire shape needs its own adapter. HF text-embeddings-inference, for example, answers `/embed` (not `/v1/embeddings`) with a bare JSON array instead of an object containing a `data` field.
@@ -191,6 +227,7 @@ Every flag has an environment variable twin, `CONFLUENCE2MD_EMBEDDING_<NAME>`, a
 | `--embedding-query-param k=v` | `QUERY_PARAMS` | extra query parameters, `;` separated |
 | `--embedding-document-prefix` | `DOCUMENT_PREFIX` | text prefix for indexed text |
 | `--embedding-query-prefix` | `QUERY_PREFIX` | text prefix for query text |
+| `--embedding-context` | `CONTEXT` | document context header, comma separated: `title`, `space`, `section` |
 | `--embedding-batch-size` | `BATCH_SIZE` | inputs per request (default 64, capped per provider) |
 | `--embedding-timeout` | `TIMEOUT` | per-request timeout (default 45s) |
 | `--embedding-max-retries` | `MAX_RETRIES` | retries after the first attempt (default 3; `-1` disables) |

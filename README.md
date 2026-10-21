@@ -103,7 +103,8 @@ confluence2md-indexer query --q text
   [--embedding id] [--embedding-model name] [--embedding-base-url url]
   [--embedding-dim N] [--embedding-api-key-env VAR] [--embedding-header k=v]
   [--embedding-query-param k=v] [--embedding-document-prefix text]
-  [--embedding-query-prefix text] [--embedding-batch-size N]
+  [--embedding-query-prefix text] [--embedding-context title,space,section]
+  [--embedding-batch-size N]
   [--embedding-timeout dur] [--embedding-max-retries N]
   [--embedding-auth-header name] [--embedding-auth-scheme scheme] [--embedding-path path]
 confluence2md-indexer stats [--db path] [--config file] [--json]
@@ -112,6 +113,11 @@ confluence2md-indexer --version
 
 Use `--embedding list` to print the available providers. Index and query must be
 given the same embedding settings; see [docs/embedding-providers.md](docs/embedding-providers.md).
+
+`--embedding-context title,space,section` prepends the selected page metadata to the text
+that is embedded, for document text only. It changes the provider identity, so index and
+query must use the same value, the default (empty) leaves existing indexes untouched, and
+switching it re-embeds the corpus.
 
 The crawler metadata is indexed too, so a query can be narrowed by what it describes:
 `--author`, `--created-by`, `--modified-by`, `--host`, repeated `--space`, `--page-id`,
