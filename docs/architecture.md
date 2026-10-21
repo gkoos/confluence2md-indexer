@@ -104,7 +104,8 @@ Provider selection and identity tracking run through one code path shared by
 indexing and querying:
 
 1. Flags, then `CONFLUENCE2MD_EMBEDDING_*` variables, then defaults select a provider.
-2. The provider reports an identity string (model, dimension, endpoint, prefixes).
+2. The provider reports an identity string (model, dimension, endpoint, prefixes, document
+   context header).
 3. Indexing stores that identity with every vector it writes and removes vectors of other identities.
 4. Querying compares the resolved provider with the identities stored in the index.
 5. A mismatch fails the query with exit code 2 rather than comparing vectors from different spaces.

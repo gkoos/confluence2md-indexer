@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gkoos/confluence2md-indexer/internal/embedding"
 	"github.com/gkoos/confluence2md-indexer/internal/query"
 )
 
@@ -38,6 +39,11 @@ func (f File) validate() error {
 	}
 	if e.MaxRetries != nil && *e.MaxRetries < -1 {
 		return fmt.Errorf("embedding.max_retries must be -1 or greater, got %d", *e.MaxRetries)
+	}
+	if e.Context != nil {
+		if _, err := embedding.ParseContext(*e.Context); err != nil {
+			return fmt.Errorf("embedding.context: %w", err)
+		}
 	}
 
 	return nil

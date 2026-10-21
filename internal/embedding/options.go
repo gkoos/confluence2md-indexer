@@ -63,8 +63,11 @@ type Options struct {
 	QueryParams []string
 	DocPrefix   string
 	QueryPrefix string
-	BatchSize   int
-	Timeout     time.Duration
+	// Context lists the document dimensions prepended to the text that is embedded.
+	// Empty, the default, embeds the chunk text as it is stored.
+	Context   []string
+	BatchSize int
+	Timeout   time.Duration
 	// MaxRetries counts retries after the first attempt. Zero means "unset" and
 	// resolves to DefaultMaxRetries; a negative value disables retries.
 	MaxRetries int
@@ -73,6 +76,10 @@ type Options struct {
 	// Source records which configuration layer supplied the provider id. It is
 	// informational and surfaces as embedding.source in command output.
 	Source string
+	// envMerged says Merge built this value and already applied the environment as a
+	// layer. Resolve must not apply it again: that would resurrect values an explicit
+	// empty flag cleared and append environment headers twice.
+	envMerged bool
 }
 
 // Present records which fields a configuration layer actually supplied, so that
@@ -92,6 +99,7 @@ type Present struct {
 	QueryParams bool
 	DocPrefix   bool
 	QueryPrefix bool
+	Context     bool
 	BatchSize   bool
 	Timeout     bool
 	MaxRetries  bool
@@ -128,6 +136,7 @@ func (env envOptions) options() Options {
 		QueryParams: env.queryParams,
 		DocPrefix:   env.docPrefix,
 		QueryPrefix: env.queryPrefix,
+		Context:     env.context,
 		BatchSize:   env.batchSize,
 		Timeout:     env.timeout,
 		MaxRetries:  env.maxRetries,
@@ -150,6 +159,7 @@ type envOptions struct {
 	queryParams []string
 	docPrefix   string
 	queryPrefix string
+	context     []string
 	batchSize   int
 	timeout     time.Duration
 	maxRetries  int
@@ -159,9 +169,16 @@ type envOptions struct {
 // withDefaults fills unset fields from the environment and then from built-in
 // defaults. It reports whether the provider id came from the environment.
 func (opts Options) withDefaults() (Options, bool, error) {
-	env, _, err := readEnvOptions()
-	if err != nil {
-		return opts, false, err
+	// Merge may already have applied the environment as a layer. Re-reading it here
+	// would overwrite a value an explicit empty flag deliberately cleared, and append
+	// environment headers a second time, so a merged configuration is left alone.
+	var env envOptions
+	if !opts.envMerged {
+		read, _, err := readEnvOptions()
+		if err != nil {
+			return opts, false, err
+		}
+		env = read
 	}
 
 	providerFromEnv := false
@@ -183,6 +200,9 @@ func (opts Options) withDefaults() (Options, bool, error) {
 	}
 	if opts.QueryPrefix == "" {
 		opts.QueryPrefix = env.queryPrefix
+	}
+	if len(opts.Context) == 0 {
+		opts.Context = env.context
 	}
 	opts.Headers = append(opts.Headers, env.headers...)
 	opts.QueryParams = append(opts.QueryParams, env.queryParams...)
@@ -216,6 +236,12 @@ func (opts Options) withDefaults() (Options, bool, error) {
 		opts.Provider = DefaultProvider
 	}
 	opts.Provider = strings.ToLower(strings.TrimSpace(opts.Provider))
+
+	context, err := NormalizeContext(opts.Context)
+	if err != nil {
+		return opts, false, err
+	}
+	opts.Context = context
 
 	return opts, providerFromEnv, nil
 }
@@ -270,6 +296,14 @@ func readEnvOptions() (envOptions, Present, error) {
 	if value := os.Getenv(EnvPrefix + "QUERY_PREFIX"); value != "" {
 		env.queryPrefix = value
 		present.QueryPrefix = true
+	}
+	if value := envString("CONTEXT"); value != "" {
+		context, err := ParseContext(value)
+		if err != nil {
+			return env, present, fmt.Errorf("%sCONTEXT: %w", EnvPrefix, err)
+		}
+		env.context = context
+		present.Context = true
 	}
 	if envString("HEADERS") != "" {
 		env.headers = envList("HEADERS")

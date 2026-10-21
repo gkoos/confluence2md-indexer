@@ -9,6 +9,10 @@ import (
 // Resolution is the result of provider selection.
 type Resolution struct {
 	Provider Provider
+	// Options is the merged configuration the provider was built from. Callers that
+	// build document text need the context selection, and re-deriving it would lose
+	// whatever the environment or the configuration file supplied.
+	Options Options
 	// Source reports which configuration layer selected the provider:
 	// SourceFlag, SourceEnv or SourceDefault.
 	Source string
@@ -58,7 +62,7 @@ func Resolve(opts Options) (Resolution, error) {
 	}
 
 	if resolved.Skip {
-		return Resolution{Provider: NoneProvider{}, Source: source}, nil
+		return Resolution{Provider: NoneProvider{}, Options: resolved, Source: source}, nil
 	}
 
 	factory, ok := Lookup(resolved.Provider)
@@ -74,5 +78,5 @@ func Resolve(opts Options) (Resolution, error) {
 		return Resolution{}, fmt.Errorf("configure embedding provider %q: %w", resolved.Provider, err)
 	}
 
-	return Resolution{Provider: provider, Source: source}, nil
+	return Resolution{Provider: provider, Options: resolved, Source: source}, nil
 }

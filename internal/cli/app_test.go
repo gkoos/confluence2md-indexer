@@ -735,3 +735,58 @@ func newTestApp(t *testing.T) *App {
 
 	return NewApp()
 }
+
+func TestRunIndexRejectsAnUnknownEmbeddingContext(t *testing.T) {
+	app := newTestApp(t)
+	dir := writeIndexFixture(t, "# Doc\n\nbody text\n")
+
+	var exit int
+	stderr := captureStderr(t, func() {
+		exit = app.Run([]string{"index", dir, "--db", filepath.Join(t.TempDir(), "index.db"), "--embedding-context", "labels"})
+	})
+
+	if exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+	for _, want := range []string{"--embedding-context", "available: title, space, section"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want it to mention %q", stderr, want)
+		}
+	}
+}
+
+// TestRunQueryNeedsTheStoredEmbeddingContext covers the acceptance criterion that a mixed
+// index is still refused: the selection is part of the identity, so a query without it
+// cannot reach the vectors that were built with it.
+func TestRunQueryNeedsTheStoredEmbeddingContext(t *testing.T) {
+	app := newTestApp(t)
+	dir := writeIndexFixture(t, "# Deployment\n\nrollback steps\n")
+	dbPath := filepath.Join(t.TempDir(), "index.db")
+
+	captureStdout(t, func() {
+		if exit := app.Run([]string{"index", dir, "--db", dbPath, "--embedding-context", "title"}); exit != exitCodeOK {
+			t.Fatalf("index exit code: %d", exit)
+		}
+	})
+
+	var exit int
+	stderr := captureStderr(t, func() {
+		exit = app.Run([]string{"query", "--db", dbPath, "--q", "rollback", "--mode", "vector"})
+	})
+	if exit != exitCodeInvalidUsage {
+		t.Fatalf("expected the identity guard to refuse the query, got exit %d", exit)
+	}
+	for _, want := range []string{"embedding mismatch", "+ctx:title"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want it to mention %q", stderr, want)
+		}
+	}
+
+	// Handing the query the same selection makes the identities agree.
+	captureStdout(t, func() {
+		exit := app.Run([]string{"query", "--db", dbPath, "--q", "rollback", "--mode", "vector", "--embedding-context", "title"})
+		if exit != exitCodeOK {
+			t.Fatalf("expected the matching selection to query, got exit %d", exit)
+		}
+	})
+}

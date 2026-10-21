@@ -230,6 +230,7 @@ type embeddingFlags struct {
 	queryParams stringListFlag
 	docPrefix   string
 	queryPrefix string
+	context     string
 	batchSize   int
 	timeout     time.Duration
 	maxRetries  int
@@ -258,6 +259,7 @@ func registerEmbeddingFlags(fs *flag.FlagSet, values *embeddingFlags) {
 	fs.Var(&values.queryParams, "embedding-query-param", "Extra query parameter in key=value form; repeatable")
 	fs.StringVar(&values.docPrefix, "embedding-document-prefix", "", "Text prefix applied to indexed text")
 	fs.StringVar(&values.queryPrefix, "embedding-query-prefix", "", "Text prefix applied to query text")
+	fs.StringVar(&values.context, "embedding-context", "", "Document context header, comma separated: title, space, section")
 	fs.IntVar(&values.batchSize, "embedding-batch-size", 0, "Inputs per embedding request")
 	fs.DurationVar(&values.timeout, "embedding-timeout", 0, "Per-request timeout, for example 30s")
 	fs.IntVar(&values.maxRetries, "embedding-max-retries", 0, "Retries after the first attempt; -1 disables retries")
@@ -276,6 +278,11 @@ func (values *embeddingFlags) options() (embedding.Options, error) {
 		return embedding.Options{}, errors.New("--embedding-max-retries must be -1, 0 or greater")
 	}
 
+	context, err := embedding.ParseContext(values.context)
+	if err != nil {
+		return embedding.Options{}, fmt.Errorf("--embedding-context: %w", err)
+	}
+
 	return embedding.Options{
 		Provider:    values.provider,
 		Model:       values.model,
@@ -289,6 +296,7 @@ func (values *embeddingFlags) options() (embedding.Options, error) {
 		QueryParams: values.queryParams,
 		DocPrefix:   values.docPrefix,
 		QueryPrefix: values.queryPrefix,
+		Context:     context,
 		BatchSize:   values.batchSize,
 		Timeout:     values.timeout,
 		MaxRetries:  values.maxRetries,
@@ -314,6 +322,7 @@ func (values *embeddingFlags) present(fs *flag.FlagSet) embedding.Present {
 	present.QueryParams = visited["embedding-query-param"]
 	present.DocPrefix = visited["embedding-document-prefix"]
 	present.QueryPrefix = visited["embedding-query-prefix"]
+	present.Context = visited["embedding-context"]
 	present.BatchSize = visited["embedding-batch-size"]
 	present.Timeout = visited["embedding-timeout"]
 	present.MaxRetries = visited["embedding-max-retries"]

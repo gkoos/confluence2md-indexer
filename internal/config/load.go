@@ -131,6 +131,11 @@ func (f File) EmbeddingOptions() (embedding.Options, embedding.Present) {
 	if e.QueryPrefix != nil {
 		options.QueryPrefix, present.QueryPrefix = *e.QueryPrefix, true
 	}
+	if e.Context != nil {
+		// Load validated the selection, so parsing cannot fail here.
+		options.Context, _ = embedding.ParseContext(*e.Context)
+		present.Context = true
+	}
 	if e.BatchSize != nil {
 		options.BatchSize, present.BatchSize = *e.BatchSize, true
 	}

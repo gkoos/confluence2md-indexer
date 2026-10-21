@@ -86,6 +86,30 @@ func TestMergeKeepsAnExplicitlyEmptyValue(t *testing.T) {
 	}
 }
 
+func TestMergeEmbeddingKeepsAnExplicitlyEmptyContext(t *testing.T) {
+	// A flag that sets an empty selection clears the file's context, which is how a
+	// single invocation returns to the undecorated vector space.
+	merged := Merge(
+		Layer{Name: SourceFlag, Options: Options{Context: nil}, Present: Present{Context: true}},
+		Layer{Name: SourceConfig, Options: Options{Context: []string{ContextTitle}}, Present: Present{Context: true}},
+	)
+
+	if len(merged.Context) != 0 {
+		t.Fatalf("context = %v, want the explicit empty value to win", merged.Context)
+	}
+}
+
+func TestMergeEmbeddingCarriesContextFromTheFile(t *testing.T) {
+	merged := Merge(
+		Layer{Name: SourceFlag, Present: Present{}},
+		Layer{Name: SourceConfig, Options: Options{Context: []string{ContextSpace}}, Present: Present{Context: true}},
+	)
+
+	if got := strings.Join(merged.Context, ","); got != ContextSpace {
+		t.Fatalf("context = %q, want the value from the file", got)
+	}
+}
+
 func TestReadEnvReportsValuesAndPresence(t *testing.T) {
 	clearEmbeddingEnvironment(t)
 	t.Setenv(EnvPrefix+"PROVIDER", "openai-compatible")
@@ -174,5 +198,73 @@ func TestOpenAIProviderStillRequiresAKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "OPENAI_API_KEY") {
 		t.Fatalf("error = %v, want it to name the expected variable", err)
+	}
+}
+
+// The three tests below cover merge followed by resolution, which is the path the CLI
+// takes. Merge already applied the environment as a layer, so Resolve must not apply it
+// again: an explicitly empty flag has to survive, and environment values must not be
+// appended twice.
+func TestResolveKeepsAnExplicitlyEmptyContextAfterMerge(t *testing.T) {
+	t.Setenv(EnvPrefix+"CONTEXT", "title")
+
+	envOptions, envPresent, err := ReadEnv()
+	if err != nil {
+		t.Fatalf("read environment: %v", err)
+	}
+
+	merged := Merge(
+		Layer{Name: SourceFlag, Present: Present{Context: true}},
+		Layer{Name: SourceEnv, Options: envOptions, Present: envPresent},
+	)
+
+	resolution, err := Resolve(merged)
+	if err != nil {
+		t.Fatalf("resolve provider: %v", err)
+	}
+	if len(resolution.Options.Context) != 0 {
+		t.Fatalf("context = %v, want the explicit empty flag to win", resolution.Options.Context)
+	}
+	if strings.Contains(resolution.Provider.Name(), "+ctx:") {
+		t.Fatalf("identity = %q, want no context marker", resolution.Provider.Name())
+	}
+}
+
+func TestResolveKeepsAnExplicitlyEmptyPrefixAfterMerge(t *testing.T) {
+	t.Setenv(EnvPrefix+"DOCUMENT_PREFIX", "passage: ")
+
+	envOptions, envPresent, err := ReadEnv()
+	if err != nil {
+		t.Fatalf("read environment: %v", err)
+	}
+
+	merged := Merge(
+		Layer{Name: SourceFlag, Present: Present{DocPrefix: true}},
+		Layer{Name: SourceEnv, Options: envOptions, Present: envPresent},
+	)
+
+	resolution, err := Resolve(merged)
+	if err != nil {
+		t.Fatalf("resolve provider: %v", err)
+	}
+	if resolution.Options.DocPrefix != "" {
+		t.Fatalf("doc prefix = %q, want the explicit empty flag to win", resolution.Options.DocPrefix)
+	}
+}
+
+func TestResolveDoesNotDuplicateMergedEnvironmentHeaders(t *testing.T) {
+	t.Setenv(EnvPrefix+"HEADERS", "X-Tenant=docs; X-Env=prod")
+
+	envOptions, envPresent, err := ReadEnv()
+	if err != nil {
+		t.Fatalf("read environment: %v", err)
+	}
+
+	resolution, err := Resolve(Merge(Layer{Name: SourceEnv, Options: envOptions, Present: envPresent}))
+	if err != nil {
+		t.Fatalf("resolve provider: %v", err)
+	}
+	if len(resolution.Options.Headers) != 2 {
+		t.Fatalf("headers = %v, want each environment header once", resolution.Options.Headers)
 	}
 }

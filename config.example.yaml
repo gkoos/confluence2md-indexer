@@ -56,6 +56,11 @@ embedding:
   document_prefix: ""
   query_prefix: ""
 
+  # Document context header: any of title, space, section. Empty (the default) embeds
+  # the chunk text as stored; a selection changes the embedding identity, so index and
+  # query must use the same value and switching it re-embeds the corpus.
+  context: ""
+
   # Request sizing and retries.
   batch_size: 64
   timeout: 45s

@@ -95,7 +95,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index ingestion failed: %w", err)
 	}
 
-	embProvider, embSource, err := resolveIndexProvider(req.Provider, req.Embedding)
+	embProvider, embOptions, embSource, err := resolveIndexProvider(req.Provider, req.Embedding)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +105,13 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	embeddingName := ""
 	if embProvider.Caps().Enabled() {
 		embeddingName = embProvider.Name()
+	}
+
+	// The header puts page metadata into the embedding input, so the store has to know
+	// which fields invalidate vectors when they move without the chunk text.
+	headerFields := db.EmbeddingHeader{
+		Title: embedding.HasContext(embOptions.Context, embedding.ContextTitle),
+		Space: embedding.HasContext(embOptions.Context, embedding.ContextSpace),
 	}
 
 	var inserted, updated, metadataUpdates, skipped, chunkWrites, embeddingWrites int
@@ -145,10 +152,14 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 				Text:       ch.Text,
 				ChunkHash:  ch.ChunkHash,
 			})
-			chunkTexts = append(chunkTexts, ch.Text)
+			chunkTexts = append(chunkTexts, embedding.DocumentText(embOptions.Context, embedding.ContextFields{
+				Title:   doc.Title,
+				Space:   doc.SpaceKey,
+				Section: ch.Section,
+			}, ch.Text))
 		}
 
-		status, written, err := db.UpsertDocumentWithChunks(ctx, database, docRecord, chunkRecords, embeddingName)
+		status, written, err := db.UpsertDocumentWithChunks(ctx, database, docRecord, chunkRecords, embeddingName, headerFields)
 		if err != nil {
 			return nil, fmt.Errorf("index persistence failed for page %s: %w", doc.PageID, err)
 		}
@@ -259,15 +270,17 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 }
 
 // resolveIndexProvider prefers an injected provider so tests never touch the
-// network, and otherwise resolves one from flags, environment and defaults.
-func resolveIndexProvider(injected embedding.Provider, options embedding.Options) (embedding.Provider, string, error) {
+// network, and otherwise resolves one from flags, environment and defaults. It returns
+// the merged options too: the caller builds document text from the context selection,
+// which the environment or the configuration file may have supplied.
+func resolveIndexProvider(injected embedding.Provider, options embedding.Options) (embedding.Provider, embedding.Options, string, error) {
 	if injected != nil {
-		return injected, "injected", nil
+		return injected, options, "injected", nil
 	}
 
 	resolution, err := embedding.Resolve(options)
 	if err != nil {
-		return nil, "", err
+		return nil, embedding.Options{}, "", err
 	}
-	return resolution.Provider, resolution.Source, nil
+	return resolution.Provider, resolution.Options, resolution.Source, nil
 }
