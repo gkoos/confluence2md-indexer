@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.7.0...v0.8.0) (2026-10-21)
+
+
+### Features
+
+* **embedding:** opt-in context header for document embeddings ([#54](https://github.com/gkoos/confluence2md-indexer/issues/54)) ([cbab1cf](https://github.com/gkoos/confluence2md-indexer/commit/cbab1cf01872c765a9512bbab71bd2bb688aaac8)), closes [#30](https://github.com/gkoos/confluence2md-indexer/issues/30)
+
+
+### Bug Fixes
+
+* **db:** index the heading breadcrumb in chunks_fts ([#56](https://github.com/gkoos/confluence2md-indexer/issues/56)) ([c7dc9ce](https://github.com/gkoos/confluence2md-indexer/commit/c7dc9ce8120b421cc5e05469c48132726916afbf)), closes [#53](https://github.com/gkoos/confluence2md-indexer/issues/53)
+
 ## [0.7.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.6.0...v0.7.0) (2026-10-21)
 
 
