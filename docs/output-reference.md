@@ -186,7 +186,8 @@ Top-level fields:
 Important counters:
 
 - `count`: number of results in this page.
-- `total`: total results available after ranking and scoring filters.
+- `total`: total results available after ranking and scoring filters, including the
+  `--max-per-page` cap.
 
 `pagination`:
 

@@ -175,6 +175,16 @@ Notes:
 - `--offset` is zero-based.
 - `--limit 0` means use `--top-k`.
 
+Keep at most one passage per page, so the top of a small `--top-k` covers several pages
+instead of repeating one:
+
+```sh
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "incident" --max-per-page 1
+```
+
+`--max-per-page 0` (the default) is unlimited. The cap runs after ranking and before
+`--top-k`, so `total` and `count` both describe the capped list.
+
 ## Context Expansion
 
 Include one adjacent chunk on each side of ranked hits:

@@ -182,6 +182,95 @@ func TestRunParentFilterKeepsDirectChildren(t *testing.T) {
 	})
 }
 
+func TestRunMaxPerPageCapsChunksPerDocument(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	// "left neighbor" is p3's first chunk, so the vector channel always scores that
+	// page positively, and lexical retrieval also matches its last chunk.
+	runInModes(t, database, Request{
+		Text:       "left neighbor",
+		TopK:       10,
+		CandidateK: 10,
+		MaxPerPage: 1,
+	}, func(t *testing.T, results []Result, _ int) {
+		seen := map[string]bool{}
+		for _, result := range results {
+			if seen[result.DocumentID] {
+				t.Fatalf("document %s appeared more than once: %+v", result.DocumentID, results)
+			}
+			seen[result.DocumentID] = true
+		}
+		if !seen["p3"] {
+			t.Fatalf("expected the multi-chunk page in the results, got %+v", results)
+		}
+		if !sortedByFused(results) {
+			t.Fatalf("expected the capped results to stay in ranked order: %+v", results)
+		}
+	})
+}
+
+func TestRunMaxPerPageDefaultsToUnlimited(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	// "neighbor" matches p3's first and last chunk, so the same page owns both
+	// slots unless the caller caps it.
+	query := func(maxPerPage int) ([]Result, int) {
+		t.Helper()
+
+		results, total, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+			Text:       "neighbor",
+			Mode:       "lexical",
+			TopK:       10,
+			CandidateK: 10,
+			MaxPerPage: maxPerPage,
+		})
+		if err != nil {
+			t.Fatalf("run query: %v", err)
+		}
+
+		return results, total
+	}
+
+	uncapped, uncappedTotal := query(0)
+	if len(uncapped) != 2 || uncappedTotal != 2 {
+		t.Fatalf("expected both chunks of the page by default, got %d results (total %d)", len(uncapped), uncappedTotal)
+	}
+	for _, result := range uncapped {
+		if result.DocumentID != "p3" {
+			t.Fatalf("expected only p3 chunks, got %s", result.DocumentID)
+		}
+	}
+
+	// A negative value is treated like "unlimited" for callers that build the
+	// request themselves; the command line rejects it.
+	negative, negativeTotal := query(-1)
+	if len(negative) != len(uncapped) || negativeTotal != uncappedTotal {
+		t.Fatalf("expected a negative cap to be unlimited, got %d results (total %d)", len(negative), negativeTotal)
+	}
+
+	capped, cappedTotal := query(1)
+	if len(capped) != 1 || cappedTotal != 1 {
+		t.Fatalf("expected one chunk after the cap, got %d results (total %d)", len(capped), cappedTotal)
+	}
+	if capped[0].ChunkID != uncapped[0].ChunkID {
+		t.Fatalf("expected the top-ranked chunk to survive the cap, got %s", capped[0].ChunkID)
+	}
+}
+
+// sortedByFused reports whether the results keep the ranked order, which every
+// result-shaping stage must preserve.
+func sortedByFused(results []Result) bool {
+	for i := 1; i < len(results); i++ {
+		if results[i-1].Fused < results[i].Fused {
+			return false
+		}
+	}
+
+	return true
+}
+
 func TestRunExpandStitchesNeighborChunks(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)

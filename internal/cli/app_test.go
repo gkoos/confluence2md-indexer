@@ -210,6 +210,56 @@ func TestRunQueryParentFilterJSON(t *testing.T) {
 	}
 }
 
+func TestRunQueryMaxPerPageJSON(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# banana\n\nbanana one\n\n## two\n\nbanana two"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	query := func(args ...string) string {
+		t.Helper()
+
+		return captureStdout(t, func() {
+			runArgs := append([]string{"query", "--db", filepath.Join(dir, defaultDBFileName), "--q", "banana", "--top-k", "10", "--json"}, args...)
+			if exit := app.Run(runArgs); exit != exitCodeOK {
+				t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+			}
+		})
+	}
+
+	if uncapped := query(); !strings.Contains(uncapped, `"count": 2`) {
+		t.Fatalf("expected both chunks of the page by default, output=%s", uncapped)
+	}
+
+	capped := query("--max-per-page", "1")
+	if !strings.Contains(capped, `"count": 1`) {
+		t.Fatalf("expected the cap to keep one chunk, output=%s", capped)
+	}
+	if !strings.Contains(capped, `"MaxPerPage": 1`) {
+		t.Fatalf("expected the cap in the echoed request, output=%s", capped)
+	}
+}
+
+func TestRunQueryMaxPerPageValidation(t *testing.T) {
+	app := newTestApp(t)
+	if exit := app.Run([]string{"query", "--q", "abc", "--max-per-page", "-1"}); exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+}
+
 func TestRunQueryExplainSuccess(t *testing.T) {
 	dir := t.TempDir()
 	metadata := `{

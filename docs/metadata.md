@@ -153,6 +153,20 @@ Both channels are min-max normalised and then combined (weighted `--alpha`, or
 with no similarity at all are dropped, while the weakest *real* match is kept, because
 normalisation maps it to exactly zero.
 
+### Result shaping
+
+Text relevance and fusion decide *which* rows rank where; these options change the shape
+of the result set afterwards, never the scores:
+
+| flag | meaning |
+| --- | --- |
+| `--max-per-page N` | at most N chunks of the same document in the ranked list; `0` (default) means unlimited |
+
+The cap is applied after fusion and priors and before `--top-k`, so the slots a long page
+would have taken with near-duplicate passages go to other documents, and `total` counts
+what is left. Both `total` and `count` describe the shaped set: `count` is the page you
+received, `total` is the ranked list before `--offset`/`--limit`.
+
 ### Ranking priors
 
 Text relevance and fusion decide the ranking on their own. An optional set of metadata

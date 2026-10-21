@@ -91,6 +91,7 @@ confluence2md-indexer query --q text
   [--mode hybrid|lexical|vector]
   [--fusion weighted|rrf] [--alpha 0..1] [--rrf-k N]
   [--top-k N] [--candidate-k N]
+  [--max-per-page N]
   [--offset N] [--limit N]
   [--space key] [--host host] [--page-id id] [--parent id]
   [--author name] [--created-by name] [--modified-by name]
@@ -116,7 +117,10 @@ The crawler metadata is indexed too, so a query can be narrowed by what it descr
 `--author`, `--created-by`, `--modified-by`, `--host`, repeated `--space`, `--page-id`,
 `--parent` (the direct children of one page), `--depth-min` and `--depth-max`,
 `--seed-only`, `--has-attachments` and `--updated-since 30d`. All of
-them are opt-in, and all of them apply to every retrieval mode. Ranking can be nudged by
+them are opt-in, and all of them apply to every retrieval mode. `--max-per-page N` caps
+how many chunks of one page a result set may contain, which stops a long page from
+filling a small `--top-k` with near-duplicate passages; `0` (the default) means unlimited.
+Ranking can be nudged by
 the same metadata with `--priors recency,authority,seed,depth,richness`, which is off by
 default and bounded by `--prior-strength`. Retrieval defaults — mode, fusion, alpha,
 `top_k`, `candidate_k`, `expand` and the priors — can live in the `query` section of

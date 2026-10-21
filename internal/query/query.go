@@ -28,6 +28,11 @@ type Request struct {
 	Limit      int
 	CandidateK int
 	Expand     int
+	// MaxPerPage caps how many chunks of the same document may appear in the
+	// results. Zero means unlimited, which keeps the default behaviour intact. It is
+	// omitted from the echoed request when unset, so an opt-in shaping option never
+	// changes the default JSON contract.
+	MaxPerPage int `json:",omitempty"`
 	Filters    db.SearchFilters
 	// Embedding configures provider resolution for this query. It is not part of
 	// the request contract: the command or API layer fills it in.
@@ -89,6 +94,9 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	if req.CandidateK <= 0 {
 		req.CandidateK = 50
 	}
+	if req.MaxPerPage < 0 {
+		req.MaxPerPage = 0
+	}
 	if req.Alpha < 0 || req.Alpha > 1 {
 		req.Alpha = 0.70
 	}
@@ -140,6 +148,9 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	}
 
 	allResults := fuse(req, lexical, vector)
+	// The per-page cap runs before truncation, so the slots a long page would have
+	// taken with near-duplicate passages go to other documents instead.
+	allResults = capPerDocument(allResults, req.MaxPerPage)
 	if len(allResults) > req.TopK {
 		allResults = allResults[:req.TopK]
 	}
@@ -158,6 +169,27 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 		results[i].Rank = start + i + 1
 	}
 	return results, total, nil
+}
+
+// capPerDocument keeps at most maxPerPage chunks of one document in the ranked
+// list. It is applied to the already-sorted results, so the retained rows and their
+// order are the top of what the caller would have received without the cap.
+func capPerDocument(results []Result, maxPerPage int) []Result {
+	if maxPerPage <= 0 {
+		return results
+	}
+
+	kept := make([]Result, 0, len(results))
+	perDocument := make(map[string]int, len(results))
+	for _, result := range results {
+		if perDocument[result.DocumentID] >= maxPerPage {
+			continue
+		}
+		perDocument[result.DocumentID]++
+		kept = append(kept, result)
+	}
+
+	return kept
 }
 
 func applyExpansion(ctx context.Context, database *sql.DB, results []Result, expand int) error {

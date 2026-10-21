@@ -434,6 +434,7 @@ func (a *App) runQuery(args []string) int {
 	fromDate := fs.String("from", "", "Lower bound for last_modified_at (YYYY-MM-DD)")
 	toDate := fs.String("to", "", "Upper bound for last_modified_at (YYYY-MM-DD)")
 	expand := fs.Int("expand", 0, "Adjacent chunk expansion count")
+	maxPerPage := fs.Int("max-per-page", 0, "Cap chunks per document in the results (0 means unlimited)")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON results")
 	explain := fs.Bool("explain", false, "Include score breakdown and diagnostics")
 	lexicalOnly := fs.Bool("lexical-only", false, "Force lexical retrieval, requiring no embedding provider")
@@ -557,6 +558,10 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintln(os.Stderr, "query --expand must be >= 0")
 		return exitCodeInvalidUsage
 	}
+	if *maxPerPage < 0 {
+		fmt.Fprintln(os.Stderr, "query --max-per-page must be >= 0")
+		return exitCodeInvalidUsage
+	}
 	if *depthMin < -1 || *depthMax < -1 {
 		fmt.Fprintln(os.Stderr, "query --depth-min and --depth-max must be >= 0")
 		return exitCodeInvalidUsage
@@ -615,6 +620,7 @@ func (a *App) runQuery(args []string) int {
 		Limit:      *limit,
 		CandidateK: *candidateK,
 		Expand:     *expand,
+		MaxPerPage: *maxPerPage,
 		Embedding:  embeddingOptions,
 		Filters: db.SearchFilters{
 			SpaceKey:       firstSpace(*spaceList),
