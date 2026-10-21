@@ -215,8 +215,9 @@ confluence2md-indexer query --db ./output/confluence2md-index.db --q "rotate sec
 }
 ```
 
-Counts are documents over the whole matching set, not the page you received, so `--top-k 1`
-reports the same facets as `--top-k 50`. Text output prints a short block instead:
+Counts are documents over the whole matching set of the retrieval window, not the page you
+received, so `--top-k 1` reports the same facets as `--top-k 50`. Text output prints a
+short block instead:
 
 ```text
 facets:
@@ -224,8 +225,9 @@ facets:
 - author: Ada Lovelace=3, Grace Hopper=2
 ```
 
-Facets never affect ranking, scores or `total`. Both channels stop at `--candidate-k`, so
-the counts describe that candidate pool rather than the whole corpus.
+Facets never affect ranking, scores or `total`. The window they count is `--candidate-k`
+per channel (default 50), so raise it when you need a wider pool; counting beyond the
+retrieval window would make vector and hybrid facets a corpus distribution.
 
 ## Context Expansion
 

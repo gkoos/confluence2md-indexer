@@ -177,18 +177,27 @@ no-op because a page is already represented once, and the result remains determi
 
 `--facets space,author` answers "what does this search actually touch". Counts are
 documents, not chunks: a page with five matching chunks counts once. They describe the
-whole matching set, not the returned page, so a `--top-k 1` request still reports the full
-shape of what matched; they never change ranking, scores or `total`, and the block is
-omitted entirely when the flag is not passed. Author buckets follow `--author`: a page
-counts for its creator and for its last modifier, so filtering by a person and faceting on
-authors agree. An empty value (a page the crawler reported no space or author for) adds no
-bucket. Author names are grouped case-insensitively under the first spelling seen, because
-`--author` matches that way; space keys keep their exact spelling, because `--space` is
-case-sensitive.
+whole matching set of the retrieval window, not the returned page, so a `--top-k 1`
+request still reports the full shape of what matched; they never change ranking, scores or
+`total`, and the block is omitted entirely when the flag is not passed. Author buckets
+follow `--author`: a page counts for its creator and for its last modifier, so filtering
+by a person and faceting on authors agree. An empty value (a page the crawler reported no
+space or author for) adds no bucket. Author names are grouped case-insensitively under the
+first spelling seen, because `--author` matches that way; space keys keep their exact
+spelling, because `--space` is case-sensitive.
 
-Because both channels are read up to `--candidate-k` before fusion, facets describe that
-candidate pool rather than the whole corpus. If you need corpus-wide counts, index or crawl
-statistics are the right source, not a query.
+The retrieval window is `--candidate-k` per channel (default 50), so that is how many
+matches a bucket can count. Raise it to widen the counted pool:
+
+```sh
+confluence2md-indexer query --db ./confluence2md-index.db --q "rotate secrets" \
+  --facets space,author --candidate-k 500
+```
+
+Counting every row the filters admit would make vector and hybrid facets report the
+corpus's space and author distribution, because the vector channel scores every embedded
+chunk instead of matching a predicate. If you need corpus-wide counts, `stats` is the
+right source, not a query.
 
 ### Ranking priors
 
