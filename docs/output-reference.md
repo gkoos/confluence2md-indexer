@@ -203,6 +203,7 @@ Result object fields:
 - `localPath`
 - `spaceKey`
 - `sourceUrl`
+- optional `canonicalUrl` when the crawler recorded one; it is the link to open and is never reconstructed from `sourceUrl`
 - `chunkText`
 - optional `baseChunkText` when context expansion is applied
 - `chunkIndex`

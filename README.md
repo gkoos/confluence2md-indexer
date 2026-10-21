@@ -270,6 +270,7 @@ The indexer reads:
 
 - JSON outputs include `schemaVersion` for machine-readability and contract stability.
 - Query JSON includes `count`, `total`, and `pagination` fields.
+- Query results carry `canonicalUrl` when the crawler recorded one, and omit it otherwise.
 - Golden tests validate index/query/stats JSON contracts end to end.
 - Field-by-field output reference is documented in [docs/output-reference.md](docs/output-reference.md).
 

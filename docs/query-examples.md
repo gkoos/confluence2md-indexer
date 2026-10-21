@@ -216,6 +216,10 @@ The payload includes:
 - `pagination`
 - `results`
 
+Each result carries `canonicalUrl` when the crawler recorded a canonical link for the
+page, and omits the field when it did not. Use it as the link to open; `sourceUrl` keeps
+the URL the page was crawled from.
+
 ## Common Validation Errors
 
 - Missing query: `query requires --q`

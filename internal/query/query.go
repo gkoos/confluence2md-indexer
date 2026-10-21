@@ -46,6 +46,7 @@ type Result struct {
 	LocalPath         string  `json:"localPath"`
 	SpaceKey          string  `json:"spaceKey"`
 	SourceURL         string  `json:"sourceUrl"`
+	CanonicalURL      string  `json:"canonicalUrl,omitempty"`
 	ChunkText         string  `json:"chunkText"`
 	BaseChunkText     string  `json:"baseChunkText,omitempty"`
 	ChunkIndex        int     `json:"chunkIndex"`
@@ -204,15 +205,16 @@ func fuse(req Request, lexical, vector []db.Candidate) []Result {
 		}
 		candidates[c.ChunkID] = c
 		r := &Result{
-			ChunkID:    c.ChunkID,
-			DocumentID: c.DocumentID,
-			PageID:     c.PageID,
-			Title:      c.Title,
-			LocalPath:  c.LocalPath,
-			SpaceKey:   c.SpaceKey,
-			SourceURL:  c.SourceURL,
-			ChunkText:  c.ChunkText,
-			ChunkIndex: c.ChunkIndex,
+			ChunkID:      c.ChunkID,
+			DocumentID:   c.DocumentID,
+			PageID:       c.PageID,
+			Title:        c.Title,
+			LocalPath:    c.LocalPath,
+			SpaceKey:     c.SpaceKey,
+			SourceURL:    c.SourceURL,
+			CanonicalURL: c.CanonicalURL,
+			ChunkText:    c.ChunkText,
+			ChunkIndex:   c.ChunkIndex,
 		}
 		combined[c.ChunkID] = r
 		return r

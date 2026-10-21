@@ -46,6 +46,11 @@ why `--depth-min 1` is the documented way to exclude seed pages.
 mode, and the seed and page counts. `stats` reports the most recent one next to a
 metadata coverage summary; `index` stays silent about it.
 
+`canonical_url` is read back out on the query path: every result carries `canonicalUrl`
+when the crawler stored one, and omits the field when it did not. `sourceUrl` is
+unchanged, so a caller that wants the page the crawler considered authoritative no longer
+has to reconstruct it.
+
 ### Freshness and coverage
 
 `stats` answers two questions about an index:

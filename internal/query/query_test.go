@@ -82,6 +82,48 @@ func TestRunTopKLimit(t *testing.T) {
 	}
 }
 
+func TestRunIncludesCanonicalURLOnlyWhenStored(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	results, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "banana",
+		Mode:       "lexical",
+		TopK:       1,
+		CandidateK: 10,
+	})
+	if err != nil {
+		t.Fatalf("run query: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result got %d", len(results))
+	}
+	if results[0].CanonicalURL != "https://example.test/pages/p2" {
+		t.Fatalf("expected the stored canonical url, got %q", results[0].CanonicalURL)
+	}
+
+	// A page the crawler reported no canonical url for must not invent one from
+	// sourceUrl; the field is additive and absent.
+	results, _, err = Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "apple",
+		Mode:       "lexical",
+		TopK:       1,
+		CandidateK: 10,
+	})
+	if err != nil {
+		t.Fatalf("run query: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result got %d", len(results))
+	}
+	if results[0].CanonicalURL != "" {
+		t.Fatalf("expected no canonical url, got %q", results[0].CanonicalURL)
+	}
+	if results[0].SourceURL == "" {
+		t.Fatalf("expected sourceUrl to stay populated")
+	}
+}
+
 func TestRunExpandStitchesNeighborChunks(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
@@ -322,6 +364,7 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 				LocalPath:      "p2.md",
 				SpaceKey:       "ENG",
 				SourceURL:      "https://example.test/p2",
+				CanonicalURL:   "https://example.test/pages/p2",
 				LastModifiedAt: "2026-01-01T00:00:00Z",
 				ContentHash:    "h2",
 			},
