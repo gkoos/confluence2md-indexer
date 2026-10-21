@@ -410,3 +410,60 @@ func TestIndexReembedsWhenTheHeaderMetadataChanges(t *testing.T) {
 			third.MetadataUpdates, third.EmbeddingWrites, len(provider.documents))
 	}
 }
+
+// TestIndexIndexesTheSectionBreadcrumb covers the search path the section column exists
+// for: "deployment" appears only in an ancestor heading and in the breadcrumb, so the
+// chunk under "Rollback" can only be found once the index carries that breadcrumb.
+func TestIndexIndexesTheSectionBreadcrumb(t *testing.T) {
+	dir := t.TempDir()
+
+	metadata := `{
+  "pages": {
+    "1": {
+      "local_path": "a.md",
+      "title": "Operations",
+      "space_key": "OPS",
+      "last_modified_at": "2026-01-15T12:00:00Z",
+      "source_url": "https://example.test/1"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+
+	markdown := "# Deployment\n\nIntro text.\n\n## Rollback\n\nSteps to undo the change.\n"
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte(markdown), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	dbPath := filepath.Join(dir, "confluence2md-index.db")
+	if _, err := Index(context.Background(), IndexRequest{
+		Folder:    dir,
+		DBPath:    dbPath,
+		Embedding: embedding.Options{Skip: true},
+	}); err != nil {
+		t.Fatalf("index failed: %v", err)
+	}
+
+	response, err := Query(context.Background(), dbPath, query.Request{
+		Text:       "deployment",
+		Mode:       "lexical",
+		TopK:       10,
+		CandidateK: 10,
+	})
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(response.Results) != 2 {
+		t.Fatalf("hits = %d, want the chunk under Rollback found by its ancestor heading", len(response.Results))
+	}
+
+	chunks := map[int]bool{}
+	for _, result := range response.Results {
+		chunks[result.ChunkIndex] = true
+	}
+	if !chunks[0] || !chunks[1] {
+		t.Fatalf("chunks = %v, want both the heading chunk and the chunk below it", chunks)
+	}
+}

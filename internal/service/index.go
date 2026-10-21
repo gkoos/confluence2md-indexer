@@ -151,6 +151,9 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 				ChunkIndex: ch.ChunkIndex,
 				Text:       ch.Text,
 				ChunkHash:  ch.ChunkHash,
+				// The breadcrumb is what the full-text index weights as the section
+				// column; without it a chunk cannot be found by an ancestor heading.
+				Section: ch.Section,
 			})
 			chunkTexts = append(chunkTexts, embedding.DocumentText(embOptions.Context, embedding.ContextFields{
 				Title:   doc.Title,
