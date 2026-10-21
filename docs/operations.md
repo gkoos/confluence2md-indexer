@@ -68,6 +68,27 @@ corpus: mode=updates pages=3 seeds=1 indexed 2026-09-20T19:04:13Z crawl complete
 
 - Compare `crawl completed …` with `indexed …`: a crawl that completed **after** the
   index was written means the crawler output has moved on, so run `index` again.
+- `--fail-if-stale` (on `index` and `stats`) turns that comparison into an exit code for CI
+  and agents:
+
+  ```sh
+  confluence2md-indexer index ./output --fail-if-stale
+  confluence2md-indexer stats --db ./confluence2md-index.db --fail-if-stale
+  ```
+
+  The command exits 2 and prints a message naming both timestamps when the stored crawl
+  completed after the index run started, for example:
+
+  ```text
+  stats: index is stale: the crawl completed at 2999-01-01T00:00:00Z, after the index run started at 2026-09-20T19:04:13.5Z; re-index it with: confluence2md-indexer index <folder>
+  ```
+
+  A fresh index exits 0, and so does one whose crawler recorded no completion timestamp —
+  there is nothing to compare. `--json` still prints its payload; the failure goes to
+  stderr.
+- The check reads what the index stored, so it detects a run that raced the crawler (or a
+  clock that disagrees), not a crawl that happened entirely after the run: the database
+  never sees the newer `metadata.json`.
 - `metadata:` counts the pages that carry each value, which is the quickest way to tell
   whether a filter that matches nothing is a genuine "no such page" or a crawler that
   never wrote the field. `nested` counts pages below the seed level.

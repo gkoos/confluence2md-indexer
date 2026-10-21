@@ -86,6 +86,7 @@ confluence2md-indexer stats --db ./output/confluence2md-index.db --json
 
 ```text
 confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings]
+  [--fail-if-stale]
 confluence2md-indexer query --q text
   [--db path] [--config file]
   [--mode hybrid|lexical|vector]
@@ -107,7 +108,7 @@ confluence2md-indexer query --q text
   [--embedding-batch-size N]
   [--embedding-timeout dur] [--embedding-max-retries N]
   [--embedding-auth-header name] [--embedding-auth-scheme scheme] [--embedding-path path]
-confluence2md-indexer stats [--db path] [--config file] [--json]
+confluence2md-indexer stats [--db path] [--config file] [--json] [--fail-if-stale]
 confluence2md-indexer --version
 ```
 
@@ -118,6 +119,19 @@ given the same embedding settings; see [docs/embedding-providers.md](docs/embedd
 that is embedded, for document text only. It changes the provider identity, so index and
 query must use the same value, the default (empty) leaves existing indexes untouched, and
 switching it re-embeds the corpus.
+
+`--fail-if-stale` turns an index that read a moving corpus into a failure, which is what a
+CI job wants after a crawl:
+
+```sh
+confluence2md-indexer index ./output --fail-if-stale
+confluence2md-indexer stats --db ./output/confluence2md-index.db --fail-if-stale
+```
+
+It exits 2 and names both timestamps when the crawl completed after the index run started;
+a fresh index, or one whose crawler reported no completion, exits 0. The check compares
+what the index stored, so it catches a run that raced the crawler rather than a folder that
+was re-crawled entirely after it. Details in [docs/operations.md](docs/operations.md).
 
 The crawler metadata is indexed too, so a query can be narrowed by what it describes:
 `--author`, `--created-by`, `--modified-by`, `--host`, repeated `--space`, `--page-id`,

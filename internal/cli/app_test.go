@@ -790,3 +790,138 @@ func TestRunQueryNeedsTheStoredEmbeddingContext(t *testing.T) {
 		}
 	})
 }
+
+// writeCrawlFixture writes a one-page corpus whose recorded crawl completed at the given
+// timestamp, and returns the folder and the db path.
+func writeCrawlFixture(t *testing.T, completedAt string) (string, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	metadata := `{
+  "last_completed_crawl_completed_at": "` + completedAt + `",
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# Doc\n\nbody text\n"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	return dir, filepath.Join(dir, "index.db")
+}
+
+// indexCorpus indexes a fixture without embeddings, which is all the freshness tests need.
+func indexCorpus(t *testing.T, app *App, dir, dbPath string) {
+	t.Helper()
+
+	captureStdout(t, func() {
+		if exit := app.Run([]string{"index", dir, "--db", dbPath, "--skip-embeddings"}); exit != exitCodeOK {
+			t.Fatalf("index exit code: %d", exit)
+		}
+	})
+}
+
+func TestStatsFailIfStaleReportsAStaleIndex(t *testing.T) {
+	app := newTestApp(t)
+	dir, dbPath := writeCrawlFixture(t, "2999-01-01T00:00:00Z")
+	indexCorpus(t, app, dir, dbPath)
+
+	// The flag is opt-in: the same stale index reports normally without it.
+	captureStdout(t, func() {
+		if exit := app.Run([]string{"stats", "--db", dbPath}); exit != exitCodeOK {
+			t.Fatalf("stats without the flag must not fail, got exit %d", exit)
+		}
+	})
+
+	var exit int
+	stderr := captureStderr(t, func() {
+		exit = app.Run([]string{"stats", "--db", dbPath, "--fail-if-stale"})
+	})
+	if exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+	for _, want := range []string{"index is stale", "2999-01-01T00:00:00Z", "confluence2md-indexer index <folder>"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want it to mention %q", stderr, want)
+		}
+	}
+}
+
+func TestStatsFailIfStaleAcceptsFreshIndexes(t *testing.T) {
+	cases := map[string]string{
+		"crawl finished before the run": "2020-01-01T00:00:00Z",
+		// A crawler that reports no completion has nothing to compare.
+		"no crawl timestamps": "",
+	}
+
+	for name, completedAt := range cases {
+		t.Run(name, func(t *testing.T) {
+			app := newTestApp(t)
+
+			dir, dbPath := "", ""
+			if completedAt == "" {
+				dir = writeIndexFixture(t, "# Doc\n\nbody text\n")
+				dbPath = filepath.Join(t.TempDir(), "index.db")
+			} else {
+				dir, dbPath = writeCrawlFixture(t, completedAt)
+			}
+			indexCorpus(t, app, dir, dbPath)
+
+			if exit := app.Run([]string{"stats", "--db", dbPath, "--fail-if-stale"}); exit != exitCodeOK {
+				t.Fatalf("expected exit %d got %d", exitCodeOK, exit)
+			}
+		})
+	}
+}
+
+func TestStatsFailIfStaleKeepsTheJSONPayload(t *testing.T) {
+	app := newTestApp(t)
+	dir, dbPath := writeCrawlFixture(t, "2999-01-01T00:00:00Z")
+	indexCorpus(t, app, dir, dbPath)
+
+	var exit int
+	var stderr string
+	stdout := captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			exit = app.Run([]string{"stats", "--db", dbPath, "--json", "--fail-if-stale"})
+		})
+	})
+
+	if !strings.Contains(stdout, `"schemaVersion"`) {
+		t.Fatalf("stdout = %q, want the payload before the failure", stdout)
+	}
+	if exit != exitCodeInvalidUsage || !strings.Contains(stderr, "index is stale") {
+		t.Fatalf("exit = %d, stderr = %q, want a stale failure", exit, stderr)
+	}
+}
+
+func TestIndexFailIfStale(t *testing.T) {
+	cases := map[string]struct {
+		completedAt string
+		wantExit    int
+	}{
+		"crawl still moving": {"2999-01-01T00:00:00Z", exitCodeInvalidUsage},
+		"crawl settled":      {"2020-01-01T00:00:00Z", exitCodeOK},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			app := newTestApp(t)
+			dir, dbPath := writeCrawlFixture(t, testCase.completedAt)
+
+			var exit int
+			stderr := captureStderr(t, func() {
+				exit = app.Run([]string{"index", dir, "--db", dbPath, "--skip-embeddings", "--fail-if-stale"})
+			})
+			if exit != testCase.wantExit {
+				t.Fatalf("exit = %d, want %d", exit, testCase.wantExit)
+			}
+			if testCase.wantExit != exitCodeOK && !strings.Contains(stderr, "index is stale") {
+				t.Fatalf("stderr = %q, want a stale failure", stderr)
+			}
+		})
+	}
+}

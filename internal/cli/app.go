@@ -93,6 +93,7 @@ func (a *App) runIndex(args []string) int {
 	configPath := registerConfigFlag(fs)
 	rebuild := fs.Bool("rebuild", false, "Recreate the database file before indexing")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON output")
+	failIfStale := fs.Bool("fail-if-stale", false, "Exit non-zero when the crawl completed after this run started")
 	skipEmbeddings := fs.Bool("skip-embeddings", false, "Store no embeddings and leave the vector channel empty")
 	embeddingValues := &embeddingFlags{}
 	registerEmbeddingFlags(fs, embeddingValues)
@@ -211,7 +212,7 @@ func (a *App) runIndex(args []string) int {
 		}
 	}
 
-	return exitCodeOK
+	return staleExit("index", indexResp.Corpus, *failIfStale)
 }
 
 // embeddingFlags collects the shared embedding flag surface. Every flag maps to
@@ -763,6 +764,7 @@ func (a *App) runStats(args []string) int {
 	dbPathFlag := fs.String("db", defaultDBFileName, "Path to SQLite DB file")
 	configPath := registerConfigFlag(fs)
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON stats")
+	failIfStale := fs.Bool("fail-if-stale", false, "Exit non-zero when the crawl completed after the index run started")
 
 	if err := fs.Parse(args); err != nil {
 		return exitCodeInvalidUsage
@@ -796,7 +798,7 @@ func (a *App) runStats(args []string) int {
 		// The response is the payload, so the API and the command cannot drift apart.
 		b, _ := json.MarshalIndent(statsResp, "", "  ")
 		fmt.Println(string(b))
-		return exitCodeOK
+		return staleExit("stats", stats.Corpus, *failIfStale)
 	}
 
 	fmt.Printf("db path: %s\n", statsResp.DBPath)
@@ -842,6 +844,26 @@ func (a *App) runStats(args []string) int {
 			parts = append(parts, "last successful crawl "+stats.Corpus.SucceededAt)
 		}
 		fmt.Printf("corpus: %s\n", strings.Join(parts, " "))
+	}
+
+	return staleExit("stats", stats.Corpus, *failIfStale)
+}
+
+// staleExit reports a stale index and returns the exit code the command should use. A
+// timestamp that cannot be read is reported the same way: a corrupt record must not pass a
+// CI gate by looking fresh.
+func staleExit(command string, snapshot *db.CorpusSnapshot, enabled bool) int {
+	if !enabled {
+		return exitCodeOK
+	}
+
+	freshness, err := service.EvaluateFreshness(snapshot)
+	if err == nil {
+		err = freshness.Err()
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", command, err)
+		return exitCodeInvalidUsage
 	}
 
 	return exitCodeOK
