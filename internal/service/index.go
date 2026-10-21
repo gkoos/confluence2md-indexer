@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gkoos/confluence2md-indexer/internal/db"
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
@@ -47,6 +48,9 @@ type IndexResponse struct {
 	ChunkWrites     int
 	RunID           string
 	DBStats         *db.Stats
+	// Corpus is the crawl this run recorded, carrying the run's own start time as
+	// IndexedAt, so a caller can tell whether the run read a corpus that was still moving.
+	Corpus *db.CorpusSnapshot
 }
 
 func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
@@ -229,7 +233,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 
 	// Record the crawl the index was built from, so a later report can show how
 	// stale the index is relative to the crawler output.
-	if err := db.RecordCorpusSnapshot(ctx, database, run.ID, db.CorpusSnapshot{
+	snapshot := db.CorpusSnapshot{
 		RunID:       run.ID,
 		StartedAt:   corpus.Crawl.StartedAt,
 		CompletedAt: corpus.Crawl.CompletedAt,
@@ -237,9 +241,12 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		Mode:        corpus.Crawl.Mode,
 		SeedCount:   corpus.Crawl.SeedCount,
 		PageCount:   corpus.Crawl.PageCount,
-	}); err != nil {
+	}
+	if err := db.RecordCorpusSnapshot(ctx, database, run.ID, snapshot); err != nil {
 		return nil, fmt.Errorf("index corpus snapshot failed: %w", err)
 	}
+	// The recorded row derives IndexedAt from the run, so report the same value here.
+	snapshot.IndexedAt = run.StartedAt.UTC().Format(time.RFC3339Nano)
 
 	dbStats, err := db.GetStats(ctx, database)
 	if err != nil {
@@ -269,6 +276,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		ChunkWrites:         chunkWrites,
 		RunID:               run.ID,
 		DBStats:             dbStats,
+		Corpus:              &snapshot,
 	}, nil
 }
 
