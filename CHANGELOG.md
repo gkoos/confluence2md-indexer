@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.5.3...v0.6.0) (2026-10-21)
+
+
+### Features
+
+* **query:** shape query results with parent filters, grouping and facets ([#48](https://github.com/gkoos/confluence2md-indexer/issues/48)) ([4a2f0d8](https://github.com/gkoos/confluence2md-indexer/commit/4a2f0d8c194c58e46d7cbe4bfde89c5357692212)), closes [#35](https://github.com/gkoos/confluence2md-indexer/issues/35)
+
 ## [0.5.3](https://github.com/gkoos/confluence2md-indexer/compare/v0.5.2...v0.5.3) (2026-10-21)
 
 
