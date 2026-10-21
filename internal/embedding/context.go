@@ -62,3 +62,43 @@ func isContextDimension(dimension string) bool {
 
 	return false
 }
+
+// ContextFields holds the document metadata a context header can carry. Empty fields
+// are skipped, so a page without a section still gets the lines it has.
+type ContextFields struct {
+	Title   string
+	Space   string
+	Section string
+}
+
+// DocumentText prepends the selected context lines to one chunk, so a short chunk keeps
+// the page's subject when it is embedded. The stored chunk text is never changed: only
+// the text handed to the provider goes through here, and query text never does.
+//
+// An empty selection, or a selection whose fields are all empty, returns text unchanged.
+func DocumentText(selection []string, fields ContextFields, text string) string {
+	if len(selection) == 0 {
+		return text
+	}
+
+	lines := make([]string, 0, len(selection))
+	for _, dimension := range selection {
+		var value string
+		switch dimension {
+		case ContextTitle:
+			value = fields.Title
+		case ContextSpace:
+			value = fields.Space
+		case ContextSection:
+			value = fields.Section
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			lines = append(lines, dimension+": "+value)
+		}
+	}
+	if len(lines) == 0 {
+		return text
+	}
+
+	return strings.Join(lines, "\n") + "\n\n" + text
+}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
 	"github.com/gkoos/confluence2md-indexer/internal/embedding/embeddingtest"
+	"github.com/gkoos/confluence2md-indexer/internal/query"
 )
 
 func TestIndexAndStatsHappyPath(t *testing.T) {
@@ -190,5 +192,139 @@ func TestIndexRecordsEmbeddingIdentity(t *testing.T) {
 	}
 	if len(statsResp.Stats.EmbeddingModels) != 1 {
 		t.Fatalf("expected no mixed identities, got %v", statsResp.Stats.EmbeddingModels)
+	}
+}
+
+// recordingProvider keeps the document texts the indexer asked to embed, which is the
+// only place the context header is observable.
+type recordingProvider struct {
+	*embeddingtest.Provider
+	documents []string
+}
+
+func (p *recordingProvider) Embed(ctx context.Context, kind embedding.Kind, texts []string) ([][]float32, error) {
+	if kind == embedding.KindDocument {
+		p.documents = append(p.documents, texts...)
+	}
+
+	return p.Provider.Embed(ctx, kind, texts)
+}
+
+func TestIndexEmbedsTheContextHeaderAndKeepsStoredTextRaw(t *testing.T) {
+	dir := t.TempDir()
+
+	metadata := `{
+  "pages": {
+    "1": {
+      "local_path": "a.md",
+      "title": "Deployment runbook",
+      "space_key": "SRE",
+      "last_modified_at": "2026-01-15T12:00:00Z",
+      "source_url": "https://example.test/1"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# Rollback\n\nshort chunk"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	dbPath := filepath.Join(dir, "confluence2md-index.db")
+	provider := &recordingProvider{Provider: embeddingtest.New(8)}
+
+	_, err := Index(context.Background(), IndexRequest{
+		Folder:   dir,
+		DBPath:   dbPath,
+		Provider: provider,
+		Embedding: embedding.Options{Context: []string{
+			embedding.ContextTitle, embedding.ContextSpace, embedding.ContextSection,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("index failed: %v", err)
+	}
+
+	if len(provider.documents) == 0 {
+		t.Fatal("expected the indexer to embed the page")
+	}
+	wantHeader := "title: Deployment runbook\nspace: SRE\nsection: Rollback\n\n"
+	if !strings.HasPrefix(provider.documents[0], wantHeader) {
+		t.Fatalf("embedding input = %q, want it to start with %q", provider.documents[0], wantHeader)
+	}
+
+	// Everything that is stored and returned stays raw: only the provider input is
+	// decorated.
+	response, err := Query(context.Background(), dbPath, query.Request{Text: "short", Mode: "lexical", TopK: 1})
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(response.Results) != 1 {
+		t.Fatalf("expected one result, got %d", len(response.Results))
+	}
+	if strings.Contains(response.Results[0].ChunkText, "title:") {
+		t.Fatalf("stored chunk text was decorated: %q", response.Results[0].ChunkText)
+	}
+	if !strings.Contains(response.Results[0].ChunkText, "short chunk") {
+		t.Fatalf("stored chunk text = %q, want the raw chunk", response.Results[0].ChunkText)
+	}
+}
+
+func TestIndexRecordsTheContextInTheIdentity(t *testing.T) {
+	dir := t.TempDir()
+
+	metadata := `{
+  "pages": {
+    "1": {
+      "local_path": "a.md",
+      "title": "Deployment runbook",
+      "space_key": "SRE",
+      "last_modified_at": "2026-01-15T12:00:00Z",
+      "source_url": "https://example.test/1"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# Rollback\n\nshort chunk"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	dbPath := filepath.Join(dir, "confluence2md-index.db")
+	ctx := context.Background()
+
+	withContext, err := Index(ctx, IndexRequest{
+		Folder: dir,
+		DBPath: dbPath,
+		Embedding: embedding.Options{
+			Provider: embedding.ProviderBowLocal,
+			// Named out of order on purpose: the identity has to be canonical.
+			Context: []string{embedding.ContextSpace, embedding.ContextTitle},
+		},
+	})
+	if err != nil {
+		t.Fatalf("index failed: %v", err)
+	}
+	if want := "bow-local:fnv1a@256+ctx:title,space"; withContext.EmbeddingName != want {
+		t.Fatalf("identity = %q, want %q", withContext.EmbeddingName, want)
+	}
+
+	// Dropping the selection changes the identity, so the next run re-embeds instead of
+	// keeping vectors from the decorated space, without needing --rebuild.
+	plain, err := Index(ctx, IndexRequest{
+		Folder:    dir,
+		DBPath:    dbPath,
+		Embedding: embedding.Options{Provider: embedding.ProviderBowLocal},
+	})
+	if err != nil {
+		t.Fatalf("second index failed: %v", err)
+	}
+	if plain.EmbeddingName != "bow-local:fnv1a@256" {
+		t.Fatalf("identity = %q, want the undecorated one", plain.EmbeddingName)
+	}
+	if plain.Skipped != 0 || plain.EmbeddingWrites == 0 {
+		t.Fatalf("expected a re-embed, got skipped=%d writes=%d", plain.Skipped, plain.EmbeddingWrites)
 	}
 }
