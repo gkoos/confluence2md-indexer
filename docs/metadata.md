@@ -80,6 +80,11 @@ blocks are content, so they neither split a section nor enter the breadcrumb. Pa
 and space key are **not** indexed: they are filters, and indexing them made a space key
 match every page in that space.
 
+An index written before the breadcrumb was stored keeps an empty `section` column: a plain
+re-index skips unchanged pages, so run `index <folder> --rebuild` once to fill it. Ranking
+can move when it is filled, because section matches start contributing weight and a query
+for an ancestor heading finds the chunks below it.
+
 `metadata_hash` fingerprints every stored metadata value, including the ones that also
 feed the search index (title, space, URL, dates), so a run can distinguish three cases.
 
