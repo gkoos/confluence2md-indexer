@@ -45,6 +45,9 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
+      - name: Fuzz the FTS query builder
+        run: go test -run=^$ -fuzz=FuzzBuildMatchExpression -fuzztime=30s ./internal/db
+
       - name: Run vector smoke gate
         run: go run ./internal/tools/smokevector
 
