@@ -179,9 +179,9 @@ the file supplies.
 The complete key reference, the credential rules and the list-versus-comma caveats are in
 [docs/operations.md](docs/operations.md#configuration-file).
 
-### In-process Query API (for MCP)
+### In-process API (for MCP)
 
-You can import and call the Query path directly without spawning the CLI process:
+You can import and call the query and stats paths directly without spawning the CLI process:
 
 ```go
 import (
@@ -221,6 +221,26 @@ _ = resp.Results // []indexerapi.QueryResult
 _ = resp.Total   // total ranked results before pagination
 _ = resp.Facets  // per-dimension document counts; nil unless Facets was set
 ```
+
+`indexerapi.Stats` reports the same document `stats --json` prints, so an agent can check
+freshness, coverage and schema state before searching:
+
+```go
+stats, err := indexerapi.Stats(context.Background(), "./output/confluence2md-index.db")
+if err != nil {
+	// a schema mismatch, or a file that holds no index, reads exactly like the CLI error
+}
+
+_ = stats.Stats.Runs     // recorded indexing runs
+_ = stats.Stats.Documents
+_ = stats.Stats.Corpus   // crawlCompletedAt next to indexedAt: later means re-index
+_ = stats.Stats.Metadata // withAuthors, withLinks, withAttachments, seeds, nested, hosts
+_ = stats.Stats.VectorReady
+```
+
+Marshalling the response gives the payload the command emits (`schemaVersion`, `command`,
+`dbPath`, `stats`), including the `omitempty` blocks, so a service can hand it to a client
+unchanged.
 
 `indexerapi.Query` opens and closes a SQLite connection per call. For occasional use this is fine. If you are issuing many queries in a single session (typical for MCP), open the database once and call `query.Run` directly:
 

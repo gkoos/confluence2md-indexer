@@ -784,18 +784,13 @@ func (a *App) runStats(args []string) int {
 	stats := statsResp.Stats
 
 	if *jsonOutput {
-		payload := map[string]any{
-			"schemaVersion": outputSchemaV1,
-			"command":       "stats",
-			"dbPath":        dbPath,
-			"stats":         stats,
-		}
-		b, _ := json.MarshalIndent(payload, "", "  ")
+		// The response is the payload, so the API and the command cannot drift apart.
+		b, _ := json.MarshalIndent(statsResp, "", "  ")
 		fmt.Println(string(b))
 		return exitCodeOK
 	}
 
-	fmt.Printf("db path: %s\n", dbPath)
+	fmt.Printf("db path: %s\n", statsResp.DBPath)
 	fmt.Printf("runs: %d\n", stats.Runs)
 	fmt.Printf("documents: %d\n", stats.Documents)
 	fmt.Printf("chunks: %d\n", stats.Chunks)

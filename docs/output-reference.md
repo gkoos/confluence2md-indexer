@@ -264,6 +264,9 @@ Fields:
 
 ## JSON Output (`stats --json`)
 
+The payload is exactly `indexerapi.StatsResponse`, so an in-process caller gets the same
+document the command prints.
+
 Top-level fields:
 
 - `schemaVersion`
