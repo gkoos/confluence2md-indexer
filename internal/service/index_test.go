@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -326,5 +327,86 @@ func TestIndexRecordsTheContextInTheIdentity(t *testing.T) {
 	}
 	if plain.Skipped != 0 || plain.EmbeddingWrites == 0 {
 		t.Fatalf("expected a re-embed, got skipped=%d writes=%d", plain.Skipped, plain.EmbeddingWrites)
+	}
+}
+
+// TestIndexReembedsWhenTheHeaderMetadataChanges covers the stale-vector case: with title
+// context on, a retitled page keeps its markdown, so the content hash does not move. The
+// embedded header does, and the vectors have to follow; metadata the header does not
+// carry must still be refreshed without re-embedding anything.
+func TestIndexReembedsWhenTheHeaderMetadataChanges(t *testing.T) {
+	dir := t.TempDir()
+
+	writeMetadata := func(title, author string) {
+		t.Helper()
+
+		metadata := fmt.Sprintf(`{
+  "pages": {
+    "1": {
+      "local_path": "a.md",
+      "title": %q,
+      "space_key": "SRE",
+      "created_by_name": %q,
+      "last_modified_at": "2026-01-15T12:00:00Z",
+      "source_url": "https://example.test/1"
+    }
+  }
+}`, title, author)
+		if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+			t.Fatalf("write metadata: %v", err)
+		}
+	}
+
+	writeMetadata("Deployment runbook", "Ada Lovelace")
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# Rollback\n\nshort chunk"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	dbPath := filepath.Join(dir, "confluence2md-index.db")
+	provider := &recordingProvider{Provider: embeddingtest.New(8)}
+	request := IndexRequest{
+		Folder:    dir,
+		DBPath:    dbPath,
+		Provider:  provider,
+		Embedding: embedding.Options{Context: []string{embedding.ContextTitle}},
+	}
+
+	first, err := Index(context.Background(), request)
+	if err != nil {
+		t.Fatalf("first index failed: %v", err)
+	}
+	if first.EmbeddingWrites == 0 || len(provider.documents) != 1 {
+		t.Fatalf("expected the page to be embedded, got writes=%d inputs=%d", first.EmbeddingWrites, len(provider.documents))
+	}
+	if !strings.Contains(provider.documents[0], "title: Deployment runbook") {
+		t.Fatalf("embedding input = %q, want the title header", provider.documents[0])
+	}
+
+	// Only the title moves; the markdown is untouched.
+	writeMetadata("Deployment runbook v2", "Ada Lovelace")
+	provider.documents = nil
+
+	second, err := Index(context.Background(), request)
+	if err != nil {
+		t.Fatalf("second index failed: %v", err)
+	}
+	if second.Updated != 1 || second.EmbeddingWrites == 0 {
+		t.Fatalf("expected a rewrite and a re-embed, got updated=%d writes=%d", second.Updated, second.EmbeddingWrites)
+	}
+	if len(provider.documents) != 1 || !strings.Contains(provider.documents[0], "title: Deployment runbook v2") {
+		t.Fatalf("embedding inputs = %v, want the new title header", provider.documents)
+	}
+
+	// A metadata change the header does not carry keeps the vectors.
+	writeMetadata("Deployment runbook v2", "Grace Hopper")
+	provider.documents = nil
+
+	third, err := Index(context.Background(), request)
+	if err != nil {
+		t.Fatalf("third index failed: %v", err)
+	}
+	if third.MetadataUpdates != 1 || third.EmbeddingWrites != 0 || len(provider.documents) != 0 {
+		t.Fatalf("expected a metadata refresh only, got metadata=%d writes=%d inputs=%d",
+			third.MetadataUpdates, third.EmbeddingWrites, len(provider.documents))
 	}
 }

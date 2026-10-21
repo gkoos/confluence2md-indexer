@@ -107,6 +107,13 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		embeddingName = embProvider.Name()
 	}
 
+	// The header puts page metadata into the embedding input, so the store has to know
+	// which fields invalidate vectors when they move without the chunk text.
+	headerFields := db.EmbeddingHeader{
+		Title: embedding.HasContext(embOptions.Context, embedding.ContextTitle),
+		Space: embedding.HasContext(embOptions.Context, embedding.ContextSpace),
+	}
+
 	var inserted, updated, metadataUpdates, skipped, chunkWrites, embeddingWrites int
 	keepIDs := make([]string, 0, len(corpus.Documents))
 	for _, doc := range corpus.Documents {
@@ -152,7 +159,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 			}, ch.Text))
 		}
 
-		status, written, err := db.UpsertDocumentWithChunks(ctx, database, docRecord, chunkRecords, embeddingName)
+		status, written, err := db.UpsertDocumentWithChunks(ctx, database, docRecord, chunkRecords, embeddingName, headerFields)
 		if err != nil {
 			return nil, fmt.Errorf("index persistence failed for page %s: %w", doc.PageID, err)
 		}

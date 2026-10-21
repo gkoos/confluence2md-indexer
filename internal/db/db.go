@@ -868,6 +868,14 @@ func DeleteEmbeddingsNotNamed(ctx context.Context, database *sql.DB, name string
 	return rows, nil
 }
 
+// EmbeddingHeader names the document metadata that feeds the text that was embedded. A
+// value that moved invalidates the vectors even when the chunk text did not: the header
+// lives in the embedding input, not in the stored chunk.
+type EmbeddingHeader struct {
+	Title bool
+	Space bool
+}
+
 // UpsertDocumentWithChunks writes a document and its chunks, and reports whether
 // they were inserted, updated or skipped.
 //
@@ -875,7 +883,11 @@ func DeleteEmbeddingsNotNamed(ctx context.Context, database *sql.DB, name string
 // document is skipped only when its content is unchanged AND its chunks already
 // carry vectors for that identity, so switching provider re-embeds the corpus
 // instead of silently keeping vectors from the previous one.
-func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc DocumentRecord, chunks []ChunkRecord, embeddingName string) (string, int, error) {
+//
+// header names the metadata fields the caller embeds as a context header. When one of
+// them moved, the document is rewritten so the caller re-embeds it; callers that embed
+// the raw chunk text pass nothing.
+func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc DocumentRecord, chunks []ChunkRecord, embeddingName string, header ...EmbeddingHeader) (string, int, error) {
 	if database == nil {
 		return "", 0, fmt.Errorf("database is nil")
 	}
@@ -888,10 +900,15 @@ func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc Documen
 		return "", 0, fmt.Errorf("document page id is empty")
 	}
 
-	var existingHash, existingMetadataHash string
+	headerFields := EmbeddingHeader{}
+	if len(header) > 0 {
+		headerFields = header[0]
+	}
+
+	var existingHash, existingMetadataHash, existingTitle, existingSpace string
 	err := database.QueryRowContext(
-		ctx, `SELECT content_hash, metadata_hash FROM documents WHERE id = ?`, doc.ID,
-	).Scan(&existingHash, &existingMetadataHash)
+		ctx, `SELECT content_hash, metadata_hash, title, space_key FROM documents WHERE id = ?`, doc.ID,
+	).Scan(&existingHash, &existingMetadataHash, &existingTitle, &existingSpace)
 	if err != nil && err != sql.ErrNoRows {
 		return "", 0, fmt.Errorf("query existing document: %w", err)
 	}
@@ -909,10 +926,15 @@ func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc Documen
 			vectorsComplete = stored == len(chunks)
 		}
 
+		// A context header is part of the embedded text but not of the chunk text, so a
+		// selected metadata value that moved invalidates the vectors on its own.
+		headerChanged := (headerFields.Title && existingTitle != doc.Title) ||
+			(headerFields.Space && existingSpace != doc.SpaceKey)
+
 		switch {
 		case existingMetadataHash == doc.MetadataHash && vectorsComplete:
 			return "skipped", 0, nil
-		case vectorsComplete:
+		case vectorsComplete && !headerChanged:
 			// Only metadata changed: refresh it without touching chunks or vectors, so
 			// a re-crawled corpus costs no embedding calls for unchanged text.
 			if err := updateDocumentMetadata(ctx, database, doc); err != nil {
@@ -920,7 +942,8 @@ func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc Documen
 			}
 			return "metadata", 0, nil
 		}
-		// Vectors are missing, so the document is rewritten below.
+		// Vectors are missing or the embedded header changed, so the document is
+		// rewritten below and the caller re-embeds it.
 	}
 
 	tx, err := database.BeginTx(ctx, nil)

@@ -63,6 +63,17 @@ func isContextDimension(dimension string) bool {
 	return false
 }
 
+// HasContext reports whether a selection includes one dimension.
+func HasContext(selection []string, dimension string) bool {
+	for _, selected := range selection {
+		if selected == dimension {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ContextFields holds the document metadata a context header can carry. Empty fields
 // are skipped, so a page without a section still gets the lines it has.
 type ContextFields struct {

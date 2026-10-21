@@ -156,3 +156,74 @@ func TestRecordCorpusSnapshotUpsertsPerRun(t *testing.T) {
 		t.Fatalf("rows = %d, page count = %d, mode = %q, want one updated row", rows, pageCount, mode)
 	}
 }
+
+// TestUpsertRewritesWhenAHeaderFieldMoves covers the decision that a context header makes
+// necessary: the embedded text can change without the chunk text changing, so a selected
+// metadata value that moved has to invalidate the vectors, while a value the header does
+// not carry must keep reusing them.
+func TestUpsertRewritesWhenAHeaderFieldMoves(t *testing.T) {
+	cases := map[string]struct {
+		header    EmbeddingHeader
+		mutate    func(*DocumentRecord)
+		want      string
+		wantWrite int
+	}{
+		"title in the header": {
+			header:    EmbeddingHeader{Title: true},
+			mutate:    func(doc *DocumentRecord) { doc.Title = "Deployment renamed" },
+			want:      "updated",
+			wantWrite: 1,
+		},
+		"space in the header": {
+			header:    EmbeddingHeader{Space: true},
+			mutate:    func(doc *DocumentRecord) { doc.SpaceKey = "ENG" },
+			want:      "updated",
+			wantWrite: 1,
+		},
+		"value the header skips": {
+			header:    EmbeddingHeader{Title: true},
+			mutate:    func(doc *DocumentRecord) { doc.SpaceKey = "ENG" },
+			want:      "metadata",
+			wantWrite: 0,
+		},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			database := newTestDatabase(t)
+			ctx := context.Background()
+
+			doc := DocumentRecord{
+				ID: "1", PageID: "1", Title: "Deployment", LocalPath: "a.md", SpaceKey: "OPS",
+				LastModifiedAt: "2026-05-20T10:00:00Z", ContentHash: "h1", MetadataHash: "m1",
+			}
+			chunk := ChunkRecord{ID: "1:000000", ChunkIndex: 0, Text: "rollback steps", ChunkHash: "c1"}
+			provider := embeddingtest.New(8)
+
+			if status, _, err := UpsertDocumentWithChunks(ctx, database, doc, []ChunkRecord{chunk}, provider.Name(), testCase.header); err != nil || status != "inserted" {
+				t.Fatalf("insert status = %q, err = %v", status, err)
+			}
+			vectors, err := provider.Embed(ctx, embedding.KindDocument, []string{chunk.Text})
+			if err != nil {
+				t.Fatalf("embed: %v", err)
+			}
+			if _, err := UpsertEmbeddings(ctx, database, []EmbeddingRecord{
+				{ChunkID: chunk.ID, Name: provider.Name(), Dimension: len(vectors[0]), Vector: vectors[0]},
+			}); err != nil {
+				t.Fatalf("upsert embeddings: %v", err)
+			}
+
+			updated := doc
+			testCase.mutate(&updated)
+			updated.MetadataHash = "m2"
+
+			status, written, err := UpsertDocumentWithChunks(ctx, database, updated, []ChunkRecord{chunk}, provider.Name(), testCase.header)
+			if err != nil {
+				t.Fatalf("second upsert: %v", err)
+			}
+			if status != testCase.want || written != testCase.wantWrite {
+				t.Fatalf("status = %q, written = %d, want %q with %d chunk writes", status, written, testCase.want, testCase.wantWrite)
+			}
+		})
+	}
+}
