@@ -369,6 +369,7 @@ Release and CI behavior:
 - [Embedding providers](docs/embedding-providers.md)
 - [Output reference](docs/output-reference.md)
 - [Architecture and data flow](docs/architecture.md)
+- [Performance and the vector channel](docs/performance.md)
 - [Operations and troubleshooting](docs/operations.md)
 - [Metadata fields, filters and indexing](docs/metadata.md)
 - [Support matrix](docs/support-matrix.md)

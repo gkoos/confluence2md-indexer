@@ -114,5 +114,6 @@ Contract stability is protected by:
 
 - [Query examples](query-examples.md)
 - [Embedding providers](embedding-providers.md)
+- [Performance: the vector channel](performance.md)
 - [Operations and troubleshooting](operations.md)
 - [MCP integration decision](mcp-integration-decision.md)
