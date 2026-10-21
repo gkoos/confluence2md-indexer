@@ -2,51 +2,12 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
-	"github.com/gkoos/confluence2md-indexer/internal/db"
+	"github.com/gkoos/confluence2md-indexer/pkg/indexerapi"
 )
 
-type StatsResponse struct {
-	Stats *db.Stats
-}
+type StatsResponse = indexerapi.StatsResponse
 
 func Stats(ctx context.Context, dbPath string) (*StatsResponse, error) {
-	dbPath = strings.TrimSpace(dbPath)
-	if dbPath == "" {
-		return nil, fmt.Errorf("stats requires a non-empty --db path")
-	}
-
-	database, err := db.Open(dbPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = database.Close() }()
-
-	// Report a schema this build cannot read before touching any table.
-	if err := db.Verify(ctx, database); err != nil {
-		return nil, err
-	}
-
-	stats, err := db.GetStats(ctx, database)
-	if err != nil {
-		return nil, err
-	}
-
-	// Crawl freshness and metadata coverage belong to this report: index output stays
-	// lean, and the stats command is where an operator looks for them.
-	coverage, err := db.DocumentMetadataCoverage(ctx, database)
-	if err != nil {
-		return nil, err
-	}
-	stats.Metadata = coverage
-
-	snapshot, err := db.LatestCorpusSnapshot(ctx, database)
-	if err != nil {
-		return nil, err
-	}
-	stats.Corpus = snapshot
-
-	return &StatsResponse{Stats: stats}, nil
+	return indexerapi.Stats(ctx, dbPath)
 }

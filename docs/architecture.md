@@ -22,6 +22,11 @@ This keeps one implementation path for command behavior while preserving stable 
   - output rendering (text/JSON)
 - `internal/service`
   - high-level command execution for index/query/stats
+  - query and stats are thin wrappers over `pkg/indexerapi`, so the CLI and in-process
+    callers cannot drift apart
+- `pkg/indexerapi`
+  - public in-process API: `Query` and `Stats`
+  - owns the JSON contracts those calls return
 - `internal/indexer`
   - metadata loading
   - markdown chunking
@@ -69,9 +74,10 @@ remaining per-row costs are in [Performance: the vector channel](performance.md)
 ## Stats Command Flow
 
 1. CLI validates `--db` and output mode.
-2. CLI calls `service.Stats`.
-3. Service opens DB and returns aggregated counters.
-4. CLI renders text or JSON.
+2. CLI calls `service.Stats`, which delegates to `indexerapi.Stats`.
+3. The API opens the database, verifies the schema, and returns the aggregated counters
+   with the crawl snapshot and metadata coverage.
+4. CLI renders text, or prints the marshalled `indexerapi.StatsResponse` as JSON.
 
 ## Data Stores
 
