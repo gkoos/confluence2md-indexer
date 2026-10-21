@@ -11,6 +11,11 @@ tasks:
     cmds:
       - go test ./...
 
+  test:fuzz:
+    desc: Fuzz the FTS query builder for a short budget
+    cmds:
+      - go test -run=^$ -fuzz=FuzzBuildMatchExpression -fuzztime=30s ./internal/db
+
   test:coverage:
     desc: Run tests with coverage profile
     cmds:

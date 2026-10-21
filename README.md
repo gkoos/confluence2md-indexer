@@ -387,6 +387,7 @@ Operational limitations:
 
 ```sh
 task test
+task test:fuzz
 task coverage:check
 task smoke:vector
 task lint
@@ -395,6 +396,7 @@ task lint
 Release and CI behavior:
 
 - coverage gate enforced in CI (`COVERAGE_MIN`, default 70)
+- FTS query builder fuzzed for 30s in the test job
 - offline vector smoke gate (`task smoke:vector`) runs in the test job
 - reproducible release builds across linux/windows/darwin on amd64 and arm64
 - contract tests for JSON command outputs

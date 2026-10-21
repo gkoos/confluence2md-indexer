@@ -6,8 +6,9 @@ Thanks for contributing.
 
 1. Run task lint.
 2. Run task test.
-3. Run task build.
-4. Run task check:phase0 (while scaffolding milestones are active).
+3. Run task test:fuzz when touching query parsing.
+4. Run task build.
+5. Run task check:phase0 (while scaffolding milestones are active).
 
 ## Code style
 
