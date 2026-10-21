@@ -72,6 +72,9 @@ func Merge(layers ...Layer) Options {
 		if !present.QueryPrefix && layer.Present.QueryPrefix {
 			merged.QueryPrefix, present.QueryPrefix = layer.Options.QueryPrefix, true
 		}
+		if !present.Context && layer.Present.Context {
+			merged.Context, present.Context = layer.Options.Context, true
+		}
 		if !present.BatchSize && layer.Present.BatchSize {
 			merged.BatchSize, present.BatchSize = layer.Options.BatchSize, true
 		}

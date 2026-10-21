@@ -31,6 +31,17 @@ func identityString(id string, model string, dimension int, parts ...identityPar
 	return builder.String()
 }
 
+// contextIdentityPart marks the document context header. The header changes the text
+// that is embedded, so the same model with a different selection is a different vector
+// space; an empty selection adds nothing and leaves the previous identity untouched.
+func contextIdentityPart(selection []string) []identityPart {
+	if len(selection) == 0 {
+		return nil
+	}
+
+	return []identityPart{{key: "ctx", value: strings.Join(selection, ",")}}
+}
+
 // shortTag returns a short, stable, non-reversible tag for the given values.
 //
 // Raw endpoint URLs are never persisted: gateway deployments sometimes carry

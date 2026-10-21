@@ -79,6 +79,7 @@ type openAIProvider struct {
 	authScheme     string
 	docPrefix      string
 	queryPrefix    string
+	context        []string
 	caps           Caps
 	client         *http.Client
 	batch          *batchEmbedder
@@ -175,9 +176,10 @@ func newOpenAIWireProvider(opts Options, defaults wireDefaults) (*openAIProvider
 		authScheme:     authScheme,
 		docPrefix:      opts.DocPrefix,
 		queryPrefix:    opts.QueryPrefix,
+		context:        opts.Context,
 		caps: Caps{
 			Semantic:       true,
-			Asymmetric:     strings.TrimSpace(opts.DocPrefix) != "" || strings.TrimSpace(opts.QueryPrefix) != "",
+			Asymmetric:     strings.TrimSpace(opts.DocPrefix) != "" || strings.TrimSpace(opts.QueryPrefix) != "" || len(opts.Context) > 0,
 			MaxBatch:       defaults.maxBatch,
 			MaxInputTokens: defaults.maxInputTokens,
 		},
@@ -246,6 +248,7 @@ func (p *openAIProvider) identityParts(defaults wireDefaults) []identityPart {
 	if p.docPrefix != "" || p.queryPrefix != "" {
 		parts = append(parts, identityPart{key: "prefixes", value: shortTag(p.docPrefix, p.queryPrefix)})
 	}
+	parts = append(parts, contextIdentityPart(p.context)...)
 
 	return parts
 }

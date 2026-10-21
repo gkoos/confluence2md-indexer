@@ -86,6 +86,30 @@ func TestMergeKeepsAnExplicitlyEmptyValue(t *testing.T) {
 	}
 }
 
+func TestMergeEmbeddingKeepsAnExplicitlyEmptyContext(t *testing.T) {
+	// A flag that sets an empty selection clears the file's context, which is how a
+	// single invocation returns to the undecorated vector space.
+	merged := Merge(
+		Layer{Name: SourceFlag, Options: Options{Context: nil}, Present: Present{Context: true}},
+		Layer{Name: SourceConfig, Options: Options{Context: []string{ContextTitle}}, Present: Present{Context: true}},
+	)
+
+	if len(merged.Context) != 0 {
+		t.Fatalf("context = %v, want the explicit empty value to win", merged.Context)
+	}
+}
+
+func TestMergeEmbeddingCarriesContextFromTheFile(t *testing.T) {
+	merged := Merge(
+		Layer{Name: SourceFlag, Present: Present{}},
+		Layer{Name: SourceConfig, Options: Options{Context: []string{ContextSpace}}, Present: Present{Context: true}},
+	)
+
+	if got := strings.Join(merged.Context, ","); got != ContextSpace {
+		t.Fatalf("context = %q, want the value from the file", got)
+	}
+}
+
 func TestReadEnvReportsValuesAndPresence(t *testing.T) {
 	clearEmbeddingEnvironment(t)
 	t.Setenv(EnvPrefix+"PROVIDER", "openai-compatible")

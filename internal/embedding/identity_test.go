@@ -79,11 +79,70 @@ func TestWireIdentityTracksVectorSpaceNotOperationalSettings(t *testing.T) {
 		"dimension": func(o *Options) { o.Dimension = 512 },
 		"endpoint":  func(o *Options) { o.BaseURL = "https://other.example.test/v1" },
 		"prefixes":  func(o *Options) { o.QueryPrefix = "query: " },
+		"context":   func(o *Options) { o.Context = []string{ContextTitle} },
 	}
 	for name, mutate := range vectorSpace {
 		if got := identityFor(mutate); got == base {
 			t.Fatalf("%s did not change the identity (%q)", name, got)
 		}
+	}
+}
+
+func TestWireIdentityRecordsTheContextSelection(t *testing.T) {
+	t.Setenv("TEST_WIRE_KEY", "token")
+
+	identityFor := func(selection []string) string {
+		t.Helper()
+
+		provider, err := newOpenAIProvider(Options{
+			Provider:  ProviderOpenAI,
+			BaseURL:   "https://wire.example.test/v1",
+			APIKeyEnv: "TEST_WIRE_KEY",
+			Context:   selection,
+		})
+		if err != nil {
+			t.Fatalf("build provider: %v", err)
+		}
+
+		return provider.Name()
+	}
+
+	// The default must stay byte-for-byte identical, or every existing index would
+	// need a re-embed the moment this feature ships.
+	base := identityFor(nil)
+	if strings.Contains(base, "+ctx:") {
+		t.Fatalf("an empty selection changed the identity: %q", base)
+	}
+
+	withContext := identityFor([]string{ContextTitle, ContextSpace})
+	if !strings.HasSuffix(withContext, "+ctx:title,space") {
+		t.Fatalf("identity = %q, want a context marker", withContext)
+	}
+	if withContext == base {
+		t.Fatal("a context selection must change the identity")
+	}
+}
+
+func TestResolveCanonicalizesTheContextSelection(t *testing.T) {
+	// A programmatic caller may name the dimensions in any order; the identity and the
+	// header must not depend on that order.
+	resolution, err := Resolve(Options{Provider: ProviderBowLocal, Context: []string{"space", "title", "space"}})
+	if err != nil {
+		t.Fatalf("resolve provider: %v", err)
+	}
+
+	if name := resolution.Provider.Name(); name != "bow-local:fnv1a@256+ctx:title,space" {
+		t.Fatalf("identity = %q, want the canonical selection", name)
+	}
+	if got := strings.Join(resolution.Options.Context, ","); got != "title,space" {
+		t.Fatalf("resolved options context = %q, want the canonical selection", got)
+	}
+}
+
+func TestResolveRejectsAnUnknownContextDimension(t *testing.T) {
+	_, err := Resolve(Options{Provider: ProviderBowLocal, Context: []string{"labels"}})
+	if err == nil || !strings.Contains(err.Error(), "unknown embedding context") {
+		t.Fatalf("expected an unknown context error, got %v", err)
 	}
 }
 

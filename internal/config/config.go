@@ -69,21 +69,23 @@ type DB struct {
 // Embedding holds vector embedding settings. Its keys mirror the --embedding-*
 // flags and the CONFLUENCE2MD_EMBEDDING_* environment variables.
 type Embedding struct {
-	Provider       *string        `mapstructure:"provider"`
-	Model          *string        `mapstructure:"model"`
-	BaseURL        *string        `mapstructure:"base_url"`
-	Path           *string        `mapstructure:"path"`
-	Dimension      *int           `mapstructure:"dimension"`
-	APIKey         *string        `mapstructure:"api_key"`
-	APIKeyEnv      *string        `mapstructure:"api_key_env"`
-	AuthHeader     *string        `mapstructure:"auth_header"`
-	AuthScheme     *string        `mapstructure:"auth_scheme"`
-	Headers        []string       `mapstructure:"headers"`
-	QueryParams    []string       `mapstructure:"query_params"`
-	DocumentPrefix *string        `mapstructure:"document_prefix"`
-	QueryPrefix    *string        `mapstructure:"query_prefix"`
-	BatchSize      *int           `mapstructure:"batch_size"`
-	Timeout        *time.Duration `mapstructure:"timeout"`
-	MaxRetries     *int           `mapstructure:"max_retries"`
-	Skip           *bool          `mapstructure:"skip"`
+	Provider       *string  `mapstructure:"provider"`
+	Model          *string  `mapstructure:"model"`
+	BaseURL        *string  `mapstructure:"base_url"`
+	Path           *string  `mapstructure:"path"`
+	Dimension      *int     `mapstructure:"dimension"`
+	APIKey         *string  `mapstructure:"api_key"`
+	APIKeyEnv      *string  `mapstructure:"api_key_env"`
+	AuthHeader     *string  `mapstructure:"auth_header"`
+	AuthScheme     *string  `mapstructure:"auth_scheme"`
+	Headers        []string `mapstructure:"headers"`
+	QueryParams    []string `mapstructure:"query_params"`
+	DocumentPrefix *string  `mapstructure:"document_prefix"`
+	QueryPrefix    *string  `mapstructure:"query_prefix"`
+	// Context selects the document context header, for example "title,space".
+	Context    *string        `mapstructure:"context"`
+	BatchSize  *int           `mapstructure:"batch_size"`
+	Timeout    *time.Duration `mapstructure:"timeout"`
+	MaxRetries *int           `mapstructure:"max_retries"`
+	Skip       *bool          `mapstructure:"skip"`
 }

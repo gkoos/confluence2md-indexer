@@ -32,6 +32,9 @@ const (
 // so callers can label results honestly.
 type BowProvider struct {
 	dim int
+	// context is the document context header selection. It changes the text that is
+	// embedded, so it belongs in the identity even though the vectors stay lexical.
+	context []string
 }
 
 // NewBowProvider returns a bag-of-words provider with the given dimension.
@@ -43,7 +46,10 @@ func NewBowProvider(dim int) *BowProvider {
 }
 
 func newBowFromOptions(opts Options) (Provider, error) {
-	return NewBowProvider(opts.Dimension), nil
+	provider := NewBowProvider(opts.Dimension)
+	provider.context = opts.Context
+
+	return provider, nil
 }
 
 func init() {
@@ -51,9 +57,9 @@ func init() {
 }
 
 // Name returns the canonical identity of the vector space, for example
-// "bow-local:fnv1a@256".
+// "bow-local:fnv1a@256" or "bow-local:fnv1a@256+ctx:title".
 func (p *BowProvider) Name() string {
-	return identityString(ProviderBowLocal, "fnv1a", p.dim)
+	return identityString(ProviderBowLocal, "fnv1a", p.dim, contextIdentityPart(p.context)...)
 }
 
 // Dimension returns the configured vector size.

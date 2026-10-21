@@ -172,6 +172,27 @@ func TestWithDefaultsPreservesPrefixWhitespace(t *testing.T) {
 	}
 }
 
+func TestWithDefaultsReadsContextFromEnvironment(t *testing.T) {
+	t.Setenv(EnvPrefix+"CONTEXT", " space, title ,space")
+
+	resolved, _, err := Options{}.withDefaults()
+	if err != nil {
+		t.Fatalf("apply defaults: %v", err)
+	}
+	if got := strings.Join(resolved.Context, ","); got != "title,space" {
+		t.Fatalf("context = %q, want the canonical selection", got)
+	}
+}
+
+func TestWithDefaultsRejectsAnUnknownContextDimension(t *testing.T) {
+	t.Setenv(EnvPrefix+"CONTEXT", "title,label")
+
+	_, _, err := Options{}.withDefaults()
+	if err == nil || !strings.Contains(err.Error(), EnvPrefix+"CONTEXT") {
+		t.Fatalf("error = %v, want it to name the environment variable", err)
+	}
+}
+
 func TestWithDefaultsAppliesFallbacks(t *testing.T) {
 	resolved, providerFromEnv, err := Options{MaxRetries: -1}.withDefaults()
 	if err != nil {

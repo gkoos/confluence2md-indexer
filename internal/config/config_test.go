@@ -30,6 +30,7 @@ embedding:
     - "api-version=2024-05"
   document_prefix: "passage: "
   query_prefix: "query: "
+  context: "space,title"
   batch_size: 32
   timeout: 12s
   max_retries: 1
@@ -74,6 +75,7 @@ func TestLoadReadsEverySupportedKey(t *testing.T) {
 		QueryParams: []string{"api-version=2024-05"},
 		DocPrefix:   "passage: ",
 		QueryPrefix: "query: ",
+		Context:     []string{embedding.ContextTitle, embedding.ContextSpace},
 		BatchSize:   32,
 		Timeout:     12 * time.Second,
 		MaxRetries:  1,
@@ -95,6 +97,7 @@ func TestLoadReadsEverySupportedKey(t *testing.T) {
 		QueryParams: true,
 		DocPrefix:   true,
 		QueryPrefix: true,
+		Context:     true,
 		BatchSize:   true,
 		Timeout:     true,
 		MaxRetries:  true,
@@ -279,6 +282,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		"negative timeout":    {"embedding:\n  timeout: -1s\n", "embedding.timeout"},
 		"retries below -1":    {"embedding:\n  max_retries: -2\n", "embedding.max_retries"},
 		"two credentials":     {"embedding:\n  api_key: \"literal\"\n  api_key_env: \"SOME_VAR\"\n", "api_key"},
+		"unknown context":     {"embedding:\n  context: \"label\"\n", "embedding.context"},
 	}
 
 	for name, tc := range cases {
