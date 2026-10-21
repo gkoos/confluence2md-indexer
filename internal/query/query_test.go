@@ -432,6 +432,111 @@ func TestRunGroupDocumentCountsDocumentsAndPaginates(t *testing.T) {
 	}
 }
 
+func TestRunFacetsCountTheMatchingSetNotTheReturnedPage(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	// Four chunks match: p2, two of p3's three chunks, and p4. A top-k of one returns a
+	// single result, so any count that matched the returned page would be wrong.
+	response, err := RunWithFacets(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "banana neighbor unrelated",
+		Mode:       "lexical",
+		TopK:       1,
+		CandidateK: 10,
+		Facets:     []string{FacetSpace, FacetAuthor},
+	})
+	if err != nil {
+		t.Fatalf("run query: %v", err)
+	}
+	if len(response.Results) != 1 || response.Total != 1 {
+		t.Fatalf("expected one returned result, got %d (total %d)", len(response.Results), response.Total)
+	}
+
+	wantSpaces := map[string]int{"ENG": 2, "OPS": 1}
+	if !reflect.DeepEqual(response.Facets[FacetSpace], wantSpaces) {
+		t.Fatalf("space facets = %v, want %v", response.Facets[FacetSpace], wantSpaces)
+	}
+
+	// p2 and p3 are touched by both people; p4 only by its creator and modifier, who
+	// are the same person.
+	wantAuthors := map[string]int{"Ada Lovelace": 3, "Grace Hopper": 2}
+	if !reflect.DeepEqual(response.Facets[FacetAuthor], wantAuthors) {
+		t.Fatalf("author facets = %v, want %v", response.Facets[FacetAuthor], wantAuthors)
+	}
+}
+
+func TestRunFacetsCountInEveryMode(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	for _, mode := range queryModes {
+		t.Run(mode, func(t *testing.T) {
+			response, err := RunWithFacets(context.Background(), database, embeddingtest.New(8), Request{
+				Text:       "banana neighbor unrelated",
+				Mode:       mode,
+				TopK:       10,
+				CandidateK: 10,
+				Facets:     []string{FacetSpace},
+			})
+			if err != nil {
+				t.Fatalf("run %s query: %v", mode, err)
+			}
+
+			documents := map[string]bool{}
+			for _, result := range response.Results {
+				documents[result.DocumentID] = true
+			}
+
+			// Every seeded page has a space, so the buckets have to add up to the
+			// documents behind them instead of to the returned rows.
+			counted := 0
+			for _, count := range response.Facets[FacetSpace] {
+				counted += count
+			}
+			if counted != len(documents) {
+				t.Fatalf("space facets count %d documents, but %d were returned: %v", counted, len(documents), response.Facets)
+			}
+		})
+	}
+}
+
+func TestRunFacetsAreOptInAndDoNotAffectRanking(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	request := Request{Text: "banana neighbor", Mode: "hybrid", TopK: 10, CandidateK: 10}
+	plain, err := RunWithFacets(context.Background(), database, embeddingtest.New(8), request)
+	if err != nil {
+		t.Fatalf("run query without facets: %v", err)
+	}
+	if plain.Facets != nil {
+		t.Fatalf("expected no facets unless they are requested, got %v", plain.Facets)
+	}
+
+	request.Facets = []string{FacetSpace, FacetAuthor}
+	faceted, err := RunWithFacets(context.Background(), database, embeddingtest.New(8), request)
+	if err != nil {
+		t.Fatalf("run query with facets: %v", err)
+	}
+	if !reflect.DeepEqual(faceted.Results, plain.Results) || faceted.Total != plain.Total {
+		t.Fatalf("expected facets to leave ranking and total alone, got %+v", faceted)
+	}
+}
+
+func TestRunFacetsRejectAnUnknownDimension(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	_, err := RunWithFacets(context.Background(), database, embeddingtest.New(8), Request{
+		Text:   "banana",
+		Mode:   "lexical",
+		Facets: []string{"label"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown facet") {
+		t.Fatalf("expected an unknown facet error, got %v", err)
+	}
+}
+
 func TestRunExpandStitchesNeighborChunks(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
@@ -660,6 +765,8 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 				SpaceKey:       "ENG",
 				SourceURL:      "https://example.test/p1",
 				LastModifiedAt: "2026-01-01T00:00:00Z",
+				CreatedByName:  "Ada Lovelace",
+				ModifiedByName: "Ada Lovelace",
 				ContentHash:    "h1",
 			},
 			chunks: []db.ChunkRecord{{ID: "p1:000000", ChunkIndex: 0, Text: "apple and pear", ChunkHash: "c1"}},
@@ -675,6 +782,8 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 				CanonicalURL:   "https://example.test/pages/p2",
 				ParentID:       "p1",
 				LastModifiedAt: "2026-01-01T00:00:00Z",
+				CreatedByName:  "Grace Hopper",
+				ModifiedByName: "Ada Lovelace",
 				ContentHash:    "h2",
 			},
 			chunks: []db.ChunkRecord{{ID: "p2:000000", ChunkIndex: 0, Text: "banana banana yellow", ChunkHash: "c2"}},
@@ -689,6 +798,8 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 				SourceURL:      "https://example.test/p3",
 				ParentID:       "p2",
 				LastModifiedAt: "2026-01-01T00:00:00Z",
+				CreatedByName:  "Ada Lovelace",
+				ModifiedByName: "Grace Hopper",
 				ContentHash:    "h3",
 			},
 			chunks: []db.ChunkRecord{
@@ -696,6 +807,23 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 				{ID: "p3:000001", ChunkIndex: 1, Text: "middleterm center", ChunkHash: "c3b"},
 				{ID: "p3:000002", ChunkIndex: 2, Text: "right neighbor", ChunkHash: "c3c"},
 			},
+		},
+		{
+			// A second space with a single chunk, so facet counts have two buckets to
+			// distinguish and the page does not share the first space's author pair.
+			doc: db.DocumentRecord{
+				ID:             "p4",
+				PageID:         "p4",
+				Title:          "Orphan",
+				LocalPath:      "p4.md",
+				SpaceKey:       "OPS",
+				SourceURL:      "https://example.test/p4",
+				LastModifiedAt: "2026-01-01T00:00:00Z",
+				CreatedByName:  "Ada Lovelace",
+				ModifiedByName: "Ada Lovelace",
+				ContentHash:    "h4",
+			},
+			chunks: []db.ChunkRecord{{ID: "p4:000000", ChunkIndex: 0, Text: "unrelated content", ChunkHash: "c4"}},
 		},
 	}
 
@@ -707,7 +835,7 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 		}
 	}
 
-	texts := []string{"apple and pear", "banana banana yellow", "left neighbor", "middleterm center", "right neighbor"}
+	texts := []string{"apple and pear", "banana banana yellow", "left neighbor", "middleterm center", "right neighbor", "unrelated content"}
 	vectors, err := provider.Embed(context.Background(), embedding.KindDocument, texts)
 	if err != nil {
 		t.Fatalf("embed: %v", err)
@@ -719,6 +847,7 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 		{ChunkID: "p3:000000", Name: provider.Name(), Dimension: len(vectors[2]), Vector: vectors[2]},
 		{ChunkID: "p3:000001", Name: provider.Name(), Dimension: len(vectors[3]), Vector: vectors[3]},
 		{ChunkID: "p3:000002", Name: provider.Name(), Dimension: len(vectors[4]), Vector: vectors[4]},
+		{ChunkID: "p4:000000", Name: provider.Name(), Dimension: len(vectors[5]), Vector: vectors[5]},
 	})
 	if err != nil {
 		t.Fatalf("upsert embeddings: %v", err)

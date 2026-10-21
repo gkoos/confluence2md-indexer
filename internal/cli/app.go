@@ -436,6 +436,7 @@ func (a *App) runQuery(args []string) int {
 	expand := fs.Int("expand", 0, "Adjacent chunk expansion count")
 	maxPerPage := fs.Int("max-per-page", 0, "Cap chunks per document in the results (0 means unlimited)")
 	group := fs.String("group", "", "Result granularity: document (one result per page); unset keeps chunks")
+	facets := fs.String("facets", "", "Facet counts over the matching set, comma separated: space, author")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON results")
 	explain := fs.Bool("explain", false, "Include score breakdown and diagnostics")
 	lexicalOnly := fs.Bool("lexical-only", false, "Force lexical retrieval, requiring no embedding provider")
@@ -535,6 +536,11 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintf(os.Stderr, "query --group must be one of: %s\n", strings.Join(query.Groups, ", "))
 		return exitCodeInvalidUsage
 	}
+	facetList, err := query.ParseFacets(*facets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query: %v\n", err)
+		return exitCodeInvalidUsage
+	}
 	if *alpha < 0 || *alpha > 1 {
 		fmt.Fprintln(os.Stderr, "query --alpha must be between 0 and 1")
 		return exitCodeInvalidUsage
@@ -627,6 +633,7 @@ func (a *App) runQuery(args []string) int {
 		Expand:     *expand,
 		MaxPerPage: *maxPerPage,
 		Group:      *group,
+		Facets:     facetList,
 		Embedding:  embeddingOptions,
 		Filters: db.SearchFilters{
 			SpaceKey:       firstSpace(*spaceList),
@@ -675,6 +682,9 @@ func (a *App) runQuery(args []string) int {
 			"offset": req.Offset,
 			"limit":  req.Limit,
 		}
+		if len(queryResp.Facets) > 0 {
+			payload["facets"] = queryResp.Facets
+		}
 		if *explain {
 			payload["explain"] = buildExplainSummary(results, req)
 		}
@@ -696,6 +706,22 @@ func (a *App) runQuery(args []string) int {
 		}
 		fmt.Printf("   path=%s\n", res.LocalPath)
 		fmt.Printf("   text=%s\n", summarizeText(res.ChunkText, 240))
+	}
+
+	if len(queryResp.Facets) > 0 {
+		fmt.Println()
+		fmt.Println("facets:")
+		for _, dimension := range req.Facets {
+			buckets := queryResp.Facets.SortedBuckets(dimension)
+			if len(buckets) == 0 {
+				continue
+			}
+			parts := make([]string, 0, len(buckets))
+			for _, bucket := range buckets {
+				parts = append(parts, fmt.Sprintf("%s=%d", bucket.Bucket, bucket.Count))
+			}
+			fmt.Printf("- %s: %s\n", dimension, strings.Join(parts, ", "))
+		}
 	}
 
 	if *explain {

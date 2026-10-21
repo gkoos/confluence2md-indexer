@@ -199,6 +199,34 @@ the page's chunks that matched. The score stays chunk-level and is the maximum o
 page, ties keep the chunk-id order, and `total` counts documents in this mode.
 `--max-per-page` has no effect here, because a page is already represented once.
 
+## Summarise a Result Set
+
+See which spaces and people a search actually touches before paging through it:
+
+```sh
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "rotate secrets" \
+  --facets space,author --top-k 5 --json
+```
+
+```json
+"facets": {
+  "space": {"SRE": 4, "OPS": 1},
+  "author": {"Ada Lovelace": 3, "Grace Hopper": 2}
+}
+```
+
+Counts are documents over the whole matching set, not the page you received, so `--top-k 1`
+reports the same facets as `--top-k 50`. Text output prints a short block instead:
+
+```text
+facets:
+- space: SRE=4, OPS=1
+- author: Ada Lovelace=3, Grace Hopper=2
+```
+
+Facets never affect ranking, scores or `total`. Both channels stop at `--candidate-k`, so
+the counts describe that candidate pool rather than the whole corpus.
+
 ## Context Expansion
 
 Include one adjacent chunk on each side of ranked hits:

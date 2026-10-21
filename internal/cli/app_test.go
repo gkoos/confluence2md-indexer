@@ -310,6 +310,68 @@ func TestRunQueryGroupValidation(t *testing.T) {
 	}
 }
 
+func TestRunQueryFacetsJSONAndText(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG", "created_by_name": "Ada Lovelace", "last_modified_by_name": "Ada Lovelace"},
+    "2": {"local_path": "b.md", "title": "Beta", "space_key": "OPS", "created_by_name": "Grace Hopper", "last_modified_by_name": "Grace Hopper"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# banana\n\nbanana text"), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	query := func(args ...string) string {
+		t.Helper()
+
+		return captureStdout(t, func() {
+			runArgs := append([]string{"query", "--db", filepath.Join(dir, defaultDBFileName), "--q", "banana"}, args...)
+			if exit := app.Run(runArgs); exit != exitCodeOK {
+				t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+			}
+		})
+	}
+
+	jsonOutput := query("--facets", "space,author", "--json")
+	for _, want := range []string{
+		`"Facets": [`,
+		`"facets": {`,
+		`"ENG": 1`,
+		`"OPS": 1`,
+		`"Ada Lovelace": 1`,
+		`"Grace Hopper": 1`,
+	} {
+		if !strings.Contains(jsonOutput, want) {
+			t.Fatalf("expected %s in the json output, output=%s", want, jsonOutput)
+		}
+	}
+
+	textOutput := query("--facets", "space,author")
+	for _, want := range []string{"facets:", "- space: ENG=1, OPS=1", "- author: Ada Lovelace=1, Grace Hopper=1"} {
+		if !strings.Contains(textOutput, want) {
+			t.Fatalf("expected %q in the text output, output=%s", want, textOutput)
+		}
+	}
+}
+
+func TestRunQueryFacetsValidation(t *testing.T) {
+	app := newTestApp(t)
+	if exit := app.Run([]string{"query", "--q", "abc", "--facets", "label"}); exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+}
+
 func TestRunQueryExplainSuccess(t *testing.T) {
 	dir := t.TempDir()
 	metadata := `{

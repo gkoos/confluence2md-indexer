@@ -162,6 +162,7 @@ of the result set afterwards, never the scores:
 | --- | --- |
 | `--max-per-page N` | at most N chunks of the same document in the ranked list; `0` (default) means unlimited |
 | `--group document` | one result per page instead of one per chunk |
+| `--facets space,author` | per-bucket document counts for the matching set |
 
 The cap is applied after fusion and priors and before `--top-k`, so the slots a long page
 would have taken with near-duplicate passages go to other documents, and `total` counts
@@ -173,6 +174,19 @@ view. Each result carries the page's highest-scoring chunk, that chunk's score a
 page score (ties keep the existing chunk-id order), and `chunkCount`, the number of the
 page's chunks that matched. `total` counts documents in this mode, `--max-per-page` is a
 no-op because a page is already represented once, and the result remains deterministic.
+
+`--facets space,author` answers "what does this search actually touch". Counts are
+documents, not chunks: a page with five matching chunks counts once. They describe the
+whole matching set, not the returned page, so a `--top-k 1` request still reports the full
+shape of what matched; they never change ranking, scores or `total`, and the block is
+omitted entirely when the flag is not passed. Author buckets follow `--author`: a page
+counts for its creator and for its last modifier, so filtering by a person and faceting on
+authors agree. An empty value (a page the crawler reported no space or author for) adds no
+bucket, and names are grouped case-insensitively under the first spelling seen.
+
+Because both channels are read up to `--candidate-k` before fusion, facets describe that
+candidate pool rather than the whole corpus. If you need corpus-wide counts, index or crawl
+statistics are the right source, not a query.
 
 ### Ranking priors
 

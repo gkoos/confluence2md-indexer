@@ -91,7 +91,7 @@ confluence2md-indexer query --q text
   [--mode hybrid|lexical|vector]
   [--fusion weighted|rrf] [--alpha 0..1] [--rrf-k N]
   [--top-k N] [--candidate-k N]
-  [--max-per-page N] [--group document]
+  [--max-per-page N] [--group document] [--facets space,author]
   [--offset N] [--limit N]
   [--space key] [--host host] [--page-id id] [--parent id]
   [--author name] [--created-by name] [--modified-by name]
@@ -122,7 +122,9 @@ how many chunks of one page a result set may contain, which stops a long page fr
 filling a small `--top-k` with near-duplicate passages; `0` (the default) means unlimited.
 `--group document` switches the result granularity: one result per page, carrying its
 highest-scoring chunk and a `chunkCount`, which is the shape an agent-facing caller wants
-when the question is "which page answers this" rather than "which passage".
+when the question is "which page answers this" rather than "which passage". `--facets
+space,author` adds per-bucket document counts for the whole matching set, so a caller can
+see which spaces or people a search actually touches before paging through it.
 Ranking can be nudged by
 the same metadata with `--priors recency,authority,seed,depth,richness`, which is off by
 default and bounded by `--prior-strength`. Retrieval defaults — mode, fusion, alpha,
@@ -200,9 +202,13 @@ resp, err := indexerapi.Query(context.Background(), "./output/confluence2md-inde
 	Offset:     0,          // zero-based offset into ranked results
 	Limit:      0,          // page size; 0 defaults to TopK
 	Expand:     0,          // adjacent chunks to include around each hit
+	MaxPerPage: 0,          // cap chunks per document; 0 means unlimited
+	Group:      "",         // "document" returns one result per page
+	Facets:     nil,        // []string{"space", "author"} for per-bucket counts
 	Filters: db.SearchFilters{
 		SpaceKey: "",         // filter by space_key
 		PageID:   "",         // filter by page_id
+		ParentID: "",         // filter by parent page id (direct children)
 		FromDate: "",         // lower bound for last_modified_at (YYYY-MM-DD)
 		ToDate:   "",         // upper bound for last_modified_at (YYYY-MM-DD)
 	},
@@ -213,6 +219,7 @@ if err != nil {
 
 _ = resp.Results // []indexerapi.QueryResult
 _ = resp.Total   // total ranked results before pagination
+_ = resp.Facets  // per-dimension document counts; nil unless Facets was set
 ```
 
 `indexerapi.Query` opens and closes a SQLite connection per call. For occasional use this is fine. If you are issuing many queries in a single session (typical for MCP), open the database once and call `query.Run` directly:

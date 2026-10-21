@@ -18,6 +18,9 @@ type QueryResult = query.Result
 type QueryResponse struct {
 	Results []QueryResult
 	Total   int
+	// Facets holds the per-bucket document counts the request asked for. It is omitted
+	// unless the request named dimensions, so the default payload stays unchanged.
+	Facets query.Facets `json:"facets,omitempty"`
 }
 
 func Query(ctx context.Context, dbPath string, req QueryRequest) (*QueryResponse, error) {
@@ -53,10 +56,10 @@ func Query(ctx context.Context, dbPath string, req QueryRequest) (*QueryResponse
 		return nil, err
 	}
 
-	results, total, err := query.Run(ctx, database, provider, req)
+	response, err := query.RunWithFacets(ctx, database, provider, req)
 	if err != nil {
 		return nil, err
 	}
 
-	return &QueryResponse{Results: results, Total: total}, nil
+	return &QueryResponse{Results: response.Results, Total: response.Total, Facets: response.Facets}, nil
 }

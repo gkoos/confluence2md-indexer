@@ -39,7 +39,10 @@ type Request struct {
 	MaxPerPage int `json:",omitempty"`
 	// Group selects the result granularity. "document" returns one result per page,
 	// carrying its best chunk; empty keeps the chunk-level contract.
-	Group   string `json:",omitempty"`
+	Group string `json:",omitempty"`
+	// Facets lists the dimensions to count over the matching set. Empty is the
+	// default and omits the facets block entirely.
+	Facets  []string `json:",omitempty"`
 	Filters db.SearchFilters
 	// Embedding configures provider resolution for this query. It is not part of
 	// the request contract: the command or API layer fills it in.
@@ -80,18 +83,44 @@ type Result struct {
 	ChunkCount int `json:"chunkCount,omitempty"`
 }
 
+// Response is one query's output: the shaped, paginated results, the size of the shaped
+// set before pagination, and the facet counts the request asked for.
+type Response struct {
+	Results []Result
+	Total   int
+	Facets  Facets
+}
+
 func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req Request) ([]Result, int, error) {
+	response, err := RunWithFacets(ctx, database, provider, req)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return response.Results, response.Total, nil
+}
+
+// RunWithFacets is Run with the facet counts the request asked for. Run stays the plain
+// results-and-total entry point, so adding facets never changes an existing caller.
+func RunWithFacets(ctx context.Context, database *sql.DB, provider embedding.Provider, req Request) (Response, error) {
 	if database == nil {
-		return nil, 0, fmt.Errorf("database is nil")
+		return Response{}, fmt.Errorf("database is nil")
 	}
 	if err := requireVectorProvider(provider, req.Mode); err != nil {
-		return nil, 0, err
+		return Response{}, err
 	}
 
 	req.Text = strings.TrimSpace(req.Text)
 	if req.Text == "" {
-		return nil, 0, nil
+		return Response{}, nil
 	}
+
+	dimensions, err := ParseFacets(strings.Join(req.Facets, ","))
+	if err != nil {
+		return Response{}, err
+	}
+	req.Facets = dimensions
+
 	if req.TopK <= 0 {
 		req.TopK = 10
 	}
@@ -125,39 +154,39 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	if req.Mode == "vector" || req.Mode == "hybrid" {
 		manifest, err := db.EmbeddingManifest(ctx, database)
 		if err != nil {
-			return nil, 0, fmt.Errorf("query embedding manifest: %w", err)
+			return Response{}, fmt.Errorf("query embedding manifest: %w", err)
 		}
 		if err := verifyEmbeddingIdentity(provider, manifest); err != nil {
-			return nil, 0, err
+			return Response{}, err
 		}
 		req.Filters.EmbeddingName = provider.Name()
 	}
 
 	var lexical []db.Candidate
 	var vector []db.Candidate
-	var err error
 
 	if req.Mode == "lexical" || req.Mode == "hybrid" {
+		var err error
 		lexical, err = db.SearchLexical(ctx, database, req.Text, req.Filters)
 		if err != nil {
-			return nil, 0, fmt.Errorf("lexical search: %w", err)
+			return Response{}, fmt.Errorf("lexical search: %w", err)
 		}
 	}
 
 	if req.Mode == "vector" || req.Mode == "hybrid" {
 		vecs, err := provider.Embed(ctx, embedding.KindQuery, []string{req.Text})
 		if err != nil {
-			return nil, 0, fmt.Errorf("query embedding: %w", err)
+			return Response{}, fmt.Errorf("query embedding: %w", err)
 		}
 		if len(vecs) > 0 {
 			vector, err = db.SearchVector(ctx, database, vecs[0], req.Filters)
 			if err != nil {
-				return nil, 0, fmt.Errorf("vector search: %w", err)
+				return Response{}, fmt.Errorf("vector search: %w", err)
 			}
 		}
 	}
 
-	allResults := fuse(req, lexical, vector)
+	allResults, candidates := fuseWithCandidates(req, lexical, vector)
 	// Grouping collapses each page to its best chunk before the cap runs, which is
 	// why --max-per-page is a no-op in this mode: there is already one row per
 	// document, and chunkCount still reports every chunk that matched.
@@ -167,6 +196,10 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	// The per-page cap runs before truncation, so the slots a long page would have
 	// taken with near-duplicate passages go to other documents instead.
 	allResults = capPerDocument(allResults, req.MaxPerPage)
+	// Facets describe the matching set, not the returned page, so they are counted
+	// before truncation. Every shaping stage above only removes duplicate chunks of
+	// one document, which cannot change a document count.
+	facets := buildFacets(req.Facets, allResults, candidates)
 	if len(allResults) > req.TopK {
 		allResults = allResults[:req.TopK]
 	}
@@ -178,13 +211,14 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	results := append([]Result(nil), allResults[start:end]...)
 	if req.Expand > 0 {
 		if err := applyExpansion(ctx, database, results, req.Expand); err != nil {
-			return nil, 0, fmt.Errorf("apply expansion: %w", err)
+			return Response{}, fmt.Errorf("apply expansion: %w", err)
 		}
 	}
 	for i := range results {
 		results[i].Rank = start + i + 1
 	}
-	return results, total, nil
+
+	return Response{Results: results, Total: total, Facets: facets}, nil
 }
 
 // groupByDocument collapses the ranked chunks into one result per page. The input is
@@ -262,6 +296,14 @@ func applyExpansion(ctx context.Context, database *sql.DB, results []Result, exp
 }
 
 func fuse(req Request, lexical, vector []db.Candidate) []Result {
+	results, _ := fuseWithCandidates(req, lexical, vector)
+
+	return results
+}
+
+// fuseWithCandidates returns the ranked results and the candidate rows behind them, so
+// stages that need metadata fusion already read (facets, priors) do not query again.
+func fuseWithCandidates(req Request, lexical, vector []db.Candidate) ([]Result, map[string]db.Candidate) {
 	// A channel only speaks when it scored something: both BM25 (negated, so higher
 	// is better) and cosine similarity treat zero as "no signal". Filtering here,
 	// on the raw score, keeps the weakest real match, which min-max normalisation
@@ -342,7 +384,7 @@ func fuse(req Request, lexical, vector []db.Candidate) []Result {
 		return out[i].Fused > out[j].Fused
 	})
 
-	return out
+	return out, candidates
 }
 
 func rrf(req Request, lexical, vector []db.Candidate, combined map[string]*Result) {
