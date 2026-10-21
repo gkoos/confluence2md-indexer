@@ -84,7 +84,7 @@ func buildFacets(dimensions []string, results []Result, candidates map[string]db
 
 		for _, result := range results {
 			for _, value := range facetValues(dimension, result, candidates) {
-				key := strings.ToLower(value)
+				key := facetKey(dimension, value)
 				documentKey := result.DocumentID + "\x00" + key
 				if counted[documentKey] {
 					continue
@@ -106,6 +106,18 @@ func buildFacets(dimensions []string, results []Result, candidates map[string]db
 	}
 
 	return facets
+}
+
+// facetKey is the value a bucket is counted under. Space filtering is case-sensitive,
+// so space buckets keep their exact spelling: merging ENG and eng would report a count
+// that filtering by either one cannot reproduce. Author filtering is case-insensitive,
+// so author buckets fold case and report the first spelling seen.
+func facetKey(dimension string, value string) string {
+	if dimension == FacetAuthor {
+		return strings.ToLower(value)
+	}
+
+	return value
 }
 
 // facetValues returns the bucket values one result contributes to a dimension. Space is

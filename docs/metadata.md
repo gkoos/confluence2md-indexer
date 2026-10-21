@@ -182,7 +182,9 @@ shape of what matched; they never change ranking, scores or `total`, and the blo
 omitted entirely when the flag is not passed. Author buckets follow `--author`: a page
 counts for its creator and for its last modifier, so filtering by a person and faceting on
 authors agree. An empty value (a page the crawler reported no space or author for) adds no
-bucket, and names are grouped case-insensitively under the first spelling seen.
+bucket. Author names are grouped case-insensitively under the first spelling seen, because
+`--author` matches that way; space keys keep their exact spelling, because `--space` is
+case-sensitive.
 
 Because both channels are read up to `--candidate-k` before fusion, facets describe that
 candidate pool rather than the whole corpus. If you need corpus-wide counts, index or crawl

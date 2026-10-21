@@ -695,6 +695,9 @@ func (a *App) runQuery(args []string) int {
 
 	if len(results) == 0 {
 		fmt.Println("no results")
+		// Facets describe the matching set, so an offset past the end of the results
+		// cannot hide them: the JSON payload still carries them for the same reason.
+		printFacetBlock(req.Facets, queryResp.Facets)
 		return exitCodeOK
 	}
 
@@ -708,21 +711,7 @@ func (a *App) runQuery(args []string) int {
 		fmt.Printf("   text=%s\n", summarizeText(res.ChunkText, 240))
 	}
 
-	if len(queryResp.Facets) > 0 {
-		fmt.Println()
-		fmt.Println("facets:")
-		for _, dimension := range req.Facets {
-			buckets := queryResp.Facets.SortedBuckets(dimension)
-			if len(buckets) == 0 {
-				continue
-			}
-			parts := make([]string, 0, len(buckets))
-			for _, bucket := range buckets {
-				parts = append(parts, fmt.Sprintf("%s=%d", bucket.Bucket, bucket.Count))
-			}
-			fmt.Printf("- %s: %s\n", dimension, strings.Join(parts, ", "))
-		}
-	}
+	printFacetBlock(req.Facets, queryResp.Facets)
 
 	if *explain {
 		fmt.Println()
@@ -733,6 +722,29 @@ func (a *App) runQuery(args []string) int {
 	}
 
 	return exitCodeOK
+}
+
+// printFacetBlock writes the text facets block. The empty-page path and the normal path
+// share it, so an offset past the end of the results cannot hide counts that the JSON
+// payload still carries.
+func printFacetBlock(dimensions []string, facets query.Facets) {
+	if len(facets) == 0 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("facets:")
+	for _, dimension := range dimensions {
+		buckets := facets.SortedBuckets(dimension)
+		if len(buckets) == 0 {
+			continue
+		}
+		parts := make([]string, 0, len(buckets))
+		for _, bucket := range buckets {
+			parts = append(parts, fmt.Sprintf("%s=%d", bucket.Bucket, bucket.Count))
+		}
+		fmt.Printf("- %s: %s\n", dimension, strings.Join(parts, ", "))
+	}
 }
 
 func (a *App) runStats(args []string) int {

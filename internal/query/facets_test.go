@@ -62,6 +62,33 @@ func TestBuildFacetsCountsDocumentsOncePerDimension(t *testing.T) {
 	}
 }
 
+func TestBuildFacetsKeepsSpaceCaseExact(t *testing.T) {
+	// --space filters with case-sensitive equality, so merging ENG and eng would
+	// report a count that filtering by either spelling cannot reproduce.
+	results := []Result{
+		{DocumentID: "d1", ChunkID: "d1:0", SpaceKey: "ENG"},
+		{DocumentID: "d2", ChunkID: "d2:0", SpaceKey: "eng"},
+	}
+	candidates := map[string]db.Candidate{
+		"d1:0": {CreatedByName: "Ada Lovelace", ModifiedByName: "Ada Lovelace"},
+		"d2:0": {CreatedByName: "ada lovelace", ModifiedByName: "ada lovelace"},
+	}
+
+	facets := buildFacets([]string{FacetSpace, FacetAuthor}, results, candidates)
+
+	wantSpaces := map[string]int{"ENG": 1, "eng": 1}
+	if !reflect.DeepEqual(facets[FacetSpace], wantSpaces) {
+		t.Fatalf("space facets = %v, want %v", facets[FacetSpace], wantSpaces)
+	}
+
+	// Author filtering is case-insensitive, so those buckets still fold together
+	// under the first spelling seen.
+	wantAuthors := map[string]int{"Ada Lovelace": 2}
+	if !reflect.DeepEqual(facets[FacetAuthor], wantAuthors) {
+		t.Fatalf("author facets = %v, want %v", facets[FacetAuthor], wantAuthors)
+	}
+}
+
 func TestFacetsSortedBucketsOrdersByCountThenValue(t *testing.T) {
 	facets := Facets{FacetSpace: map[string]int{"OPS": 1, "ENG": 2, "SRE": 2}}
 

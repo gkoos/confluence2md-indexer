@@ -363,6 +363,23 @@ func TestRunQueryFacetsJSONAndText(t *testing.T) {
 			t.Fatalf("expected %q in the text output, output=%s", want, textOutput)
 		}
 	}
+
+	// An offset past the end of the results still has a matching set behind it, so the
+	// counts have to survive in both outputs.
+	emptyJSON := query("--facets", "space", "--top-k", "1", "--offset", "1", "--json")
+	if !strings.Contains(emptyJSON, `"count": 0`) {
+		t.Fatalf("expected an empty page, output=%s", emptyJSON)
+	}
+	if !strings.Contains(emptyJSON, `"facets"`) {
+		t.Fatalf("expected the facets in the empty page json, output=%s", emptyJSON)
+	}
+
+	emptyText := query("--facets", "space", "--top-k", "1", "--offset", "1")
+	for _, want := range []string{"no results", "facets:", "- space: ENG=1, OPS=1"} {
+		if !strings.Contains(emptyText, want) {
+			t.Fatalf("expected %q in the empty page text output, output=%s", want, emptyText)
+		}
+	}
 }
 
 func TestRunQueryFacetsValidation(t *testing.T) {
