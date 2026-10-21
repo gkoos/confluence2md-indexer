@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3](https://github.com/gkoos/confluence2md-indexer/compare/v0.5.2...v0.5.3) (2026-10-21)
+
+
+### Performance Improvements
+
+* **db:** stream vector candidates and hydrate after ranking ([#46](https://github.com/gkoos/confluence2md-indexer/issues/46)) ([ba75ddf](https://github.com/gkoos/confluence2md-indexer/commit/ba75ddf07a5a2794985ee8b07d67a5bdbed05009)), closes [#27](https://github.com/gkoos/confluence2md-indexer/issues/27)
+
 ## [0.5.2](https://github.com/gkoos/confluence2md-indexer/compare/v0.5.1...v0.5.2) (2026-10-20)
 
 
