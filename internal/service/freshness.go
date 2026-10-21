@@ -8,10 +8,9 @@ import (
 	"github.com/gkoos/confluence2md-indexer/internal/db"
 )
 
-// reindexCommand is what a stale index needs. It is deliberately not --rebuild: an
-// incremental run already picks up the crawl that moved on, while a rebuild re-embeds the
-// whole corpus for no freshness benefit.
-const reindexCommand = "confluence2md-indexer index <folder>"
+// defaultReindexCommand is the fallback hint when a caller has no command context. Callers
+// that know the folder and the database should render the exact command instead.
+const defaultReindexCommand = "confluence2md-indexer index <folder>"
 
 // Freshness is the comparison --fail-if-stale exposes: the crawl an index recorded
 // completed after the run that recorded it started, which means that run read a corpus
@@ -61,14 +60,23 @@ func EvaluateFreshness(snapshot *db.CorpusSnapshot) (Freshness, error) {
 	return freshness, nil
 }
 
-// Err renders the failure both commands report, or nil when the index is fresh.
-func (f Freshness) Err() error {
-	if !f.Stale {
-		return nil
+// StaleError renders the failure both commands report, or nil when the index is fresh.
+//
+// reindexCommand is the command the caller wants the message to name. It has to carry the
+// database that was checked: the default database lives inside the indexed folder, so a
+// hint without --db can send the user to a different file.
+func StaleError(snapshot *db.CorpusSnapshot, reindexCommand string) error {
+	freshness, err := EvaluateFreshness(snapshot)
+	if err != nil || !freshness.Stale {
+		return err
+	}
+
+	if strings.TrimSpace(reindexCommand) == "" {
+		reindexCommand = defaultReindexCommand
 	}
 
 	return fmt.Errorf(
 		"index is stale: the crawl completed at %s, after the index run started at %s; re-index it with: %s",
-		f.CompletedAt, f.IndexedAt, reindexCommand,
+		freshness.CompletedAt, freshness.IndexedAt, reindexCommand,
 	)
 }

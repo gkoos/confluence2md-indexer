@@ -843,7 +843,14 @@ func TestStatsFailIfStaleReportsAStaleIndex(t *testing.T) {
 	if exit != exitCodeInvalidUsage {
 		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
 	}
-	for _, want := range []string{"index is stale", "2999-01-01T00:00:00Z", "confluence2md-indexer index <folder>"} {
+	for _, want := range []string{
+		"index is stale",
+		"2999-01-01T00:00:00Z",
+		"confluence2md-indexer index <folder>",
+		// The hint has to name the database that was checked: the default lives inside
+		// the indexed folder, so a bare "index <folder>" could update a different file.
+		"--db " + dbPath,
+	} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr = %q, want it to mention %q", stderr, want)
 		}
@@ -923,5 +930,75 @@ func TestIndexFailIfStale(t *testing.T) {
 				t.Fatalf("stderr = %q, want a stale failure", stderr)
 			}
 		})
+	}
+}
+
+// TestIndexFailIfStaleNamesTheExactCommand covers the case the hint exists for: the folder
+// and the database are not the same place, and both may need quoting.
+func TestIndexFailIfStaleNamesTheExactCommand(t *testing.T) {
+	app := newTestApp(t)
+
+	dir := filepath.Join(t.TempDir(), "in put")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create input folder: %v", err)
+	}
+	metadata := `{
+  "last_completed_crawl_completed_at": "2999-01-01T00:00:00Z",
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# Doc\n\nbody text\n"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, nil, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "state", "index.db")
+
+	var exit int
+	stderr := captureStderr(t, func() {
+		exit = app.Run([]string{
+			"index", dir,
+			"--db", dbPath,
+			"--config", configPath,
+			"--skip-embeddings",
+			"--fail-if-stale",
+		})
+	})
+	if exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+
+	for _, want := range []string{
+		"confluence2md-indexer index '" + dir + "'",
+		"--db " + dbPath,
+		"--config " + configPath,
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want it to mention %q", stderr, want)
+		}
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	cases := map[string]string{
+		"":                `""`,
+		"./output":        "./output",
+		"/srv/in put":     "'/srv/in put'",
+		"C:\\state\\x.db": "C:\\state\\x.db",
+		"a$b":             "'a$b'",
+		"it's":            `"it's"`,
+	}
+
+	for value, want := range cases {
+		if got := shellQuote(value); got != want {
+			t.Fatalf("shellQuote(%q) = %q, want %q", value, got, want)
+		}
 	}
 }

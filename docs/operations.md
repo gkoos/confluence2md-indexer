@@ -72,16 +72,22 @@ corpus: mode=updates pages=3 seeds=1 indexed 2026-09-20T19:04:13Z crawl complete
   and agents:
 
   ```sh
-  confluence2md-indexer index ./output --fail-if-stale
-  confluence2md-indexer stats --db ./confluence2md-index.db --fail-if-stale
+  # index into an explicit database, then check that same database
+  confluence2md-indexer index ./output --db ./state/confluence2md-index.db --fail-if-stale
+  confluence2md-indexer stats --db ./state/confluence2md-index.db --fail-if-stale
   ```
 
   The command exits 2 and prints a message naming both timestamps when the stored crawl
   completed after the index run started, for example:
 
   ```text
-  stats: index is stale: the crawl completed at 2999-01-01T00:00:00Z, after the index run started at 2026-09-20T19:04:13.5Z; re-index it with: confluence2md-indexer index <folder>
+  stats: index is stale: the crawl completed at 2999-01-01T00:00:00Z, after the index run started at 2026-09-20T19:04:13.5Z; re-index it with: confluence2md-indexer index <folder> --db ./state/confluence2md-index.db
   ```
+
+  The hint always names `--db`, because the default database lives inside the indexed
+  folder: replacing `<folder>` alone can update a different file. `index` fills in the
+  folder and repeats a `--config` you passed; `stats` only knows the database, so its hint
+  keeps `<folder>` as the placeholder. Paths that a shell would split are quoted.
 
   A fresh index exits 0, and so does one whose crawler recorded no completion timestamp —
   there is nothing to compare. `--json` still prints its payload; the failure goes to

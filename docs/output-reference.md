@@ -263,8 +263,9 @@ Fields:
 - `vector capability` (printed when a capability was recorded)
 
 With `--fail-if-stale`, a stale index (the crawl completed after the index run started)
-prints the same report and then exits 2 with a message naming both timestamps on stderr.
-A fresh index, or one whose crawler recorded no completion timestamp, exits 0.
+prints the same report and then exits 2 with a message naming both timestamps and the
+command that re-indexes that database on stderr. A fresh index, or one whose crawler
+recorded no completion timestamp, exits 0.
 
 ## JSON Output (`stats --json`)
 

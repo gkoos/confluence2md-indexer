@@ -212,7 +212,7 @@ func (a *App) runIndex(args []string) int {
 		}
 	}
 
-	return staleExit("index", indexResp.Corpus, *failIfStale)
+	return staleExit("index", indexResp.Corpus, *failIfStale, reindexHint(indexResp.InputFolder, dbPath, *configPath))
 }
 
 // embeddingFlags collects the shared embedding flag surface. Every flag maps to
@@ -798,7 +798,7 @@ func (a *App) runStats(args []string) int {
 		// The response is the payload, so the API and the command cannot drift apart.
 		b, _ := json.MarshalIndent(statsResp, "", "  ")
 		fmt.Println(string(b))
-		return staleExit("stats", stats.Corpus, *failIfStale)
+		return staleExit("stats", stats.Corpus, *failIfStale, reindexHint("", dbPath, *configPath))
 	}
 
 	fmt.Printf("db path: %s\n", statsResp.DBPath)
@@ -846,27 +846,65 @@ func (a *App) runStats(args []string) int {
 		fmt.Printf("corpus: %s\n", strings.Join(parts, " "))
 	}
 
-	return staleExit("stats", stats.Corpus, *failIfStale)
+	return staleExit("stats", stats.Corpus, *failIfStale, reindexHint("", dbPath, *configPath))
 }
 
 // staleExit reports a stale index and returns the exit code the command should use. A
 // timestamp that cannot be read is reported the same way: a corrupt record must not pass a
 // CI gate by looking fresh.
-func staleExit(command string, snapshot *db.CorpusSnapshot, enabled bool) int {
+func staleExit(command string, snapshot *db.CorpusSnapshot, enabled bool, reindex string) int {
 	if !enabled {
 		return exitCodeOK
 	}
 
-	freshness, err := service.EvaluateFreshness(snapshot)
-	if err == nil {
-		err = freshness.Err()
-	}
-	if err != nil {
+	if err := service.StaleError(snapshot, reindex); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", command, err)
 		return exitCodeInvalidUsage
 	}
 
 	return exitCodeOK
+}
+
+// reindexHint renders the command that refreshes the database this process checked. The
+// database is always named: the default database lives inside the indexed folder, so a bare
+// "index <folder>" can update a different file. The folder stays a placeholder when the
+// command only knew the database, and a --config the user passed is repeated because the
+// embedding settings have to match the stored identity.
+func reindexHint(folder, dbPath, configPath string) string {
+	parts := make([]string, 0, 7)
+	parts = append(parts, "confluence2md-indexer", "index")
+
+	if folder = strings.TrimSpace(folder); folder != "" {
+		parts = append(parts, shellQuote(folder))
+	} else {
+		parts = append(parts, "<folder>")
+	}
+	parts = append(parts, "--db", shellQuote(dbPath))
+
+	if configPath = strings.TrimSpace(configPath); configPath != "" {
+		parts = append(parts, "--config", shellQuote(configPath))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// shellQuote wraps a value that a shell would split or expand. Single quotes are literal in
+// POSIX shells and PowerShell; a value carrying one falls back to double quotes with the
+// characters both shells still read escaped.
+func shellQuote(value string) string {
+	if value == "" {
+		return `""`
+	}
+	if !strings.ContainsAny(value, " \t'\"$`&|<>()*?[]{}!;#~") {
+		return value
+	}
+	if !strings.ContainsRune(value, '\'') {
+		return "'" + value + "'"
+	}
+
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`").Replace(value)
+
+	return `"` + escaped + `"`
 }
 
 func (a *App) printUsage(out *os.File) {
