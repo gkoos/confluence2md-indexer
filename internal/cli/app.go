@@ -430,9 +430,13 @@ func (a *App) runQuery(args []string) int {
 	priorStrength := fs.Float64("prior-strength", 0, "Maximum relative score adjustment from priors (0..1; unset means the default)")
 	recencyHalfLife := fs.String("recency-half-life", "", "Age at which the recency prior falls to half, for example 180d or 6w")
 	pageID := fs.String("page-id", "", "Filter by page_id")
+	parent := fs.String("parent", "", "Filter by parent page id, keeping its direct children")
 	fromDate := fs.String("from", "", "Lower bound for last_modified_at (YYYY-MM-DD)")
 	toDate := fs.String("to", "", "Upper bound for last_modified_at (YYYY-MM-DD)")
 	expand := fs.Int("expand", 0, "Adjacent chunk expansion count")
+	maxPerPage := fs.Int("max-per-page", 0, "Cap chunks per document in the results (0 means unlimited)")
+	group := fs.String("group", "", "Result granularity: document (one result per page); unset keeps chunks")
+	facets := fs.String("facets", "", "Facet counts over the matching set, comma separated: space, author")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON results")
 	explain := fs.Bool("explain", false, "Include score breakdown and diagnostics")
 	lexicalOnly := fs.Bool("lexical-only", false, "Force lexical retrieval, requiring no embedding provider")
@@ -528,6 +532,15 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintf(os.Stderr, "query --fusion must be one of: %s\n", strings.Join(query.Fusions, ", "))
 		return exitCodeInvalidUsage
 	}
+	if *group != "" && !isOneOf(*group, query.Groups...) {
+		fmt.Fprintf(os.Stderr, "query --group must be one of: %s\n", strings.Join(query.Groups, ", "))
+		return exitCodeInvalidUsage
+	}
+	facetList, err := query.ParseFacets(*facets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query: %v\n", err)
+		return exitCodeInvalidUsage
+	}
 	if *alpha < 0 || *alpha > 1 {
 		fmt.Fprintln(os.Stderr, "query --alpha must be between 0 and 1")
 		return exitCodeInvalidUsage
@@ -554,6 +567,10 @@ func (a *App) runQuery(args []string) int {
 	}
 	if *expand < 0 {
 		fmt.Fprintln(os.Stderr, "query --expand must be >= 0")
+		return exitCodeInvalidUsage
+	}
+	if *maxPerPage < 0 {
+		fmt.Fprintln(os.Stderr, "query --max-per-page must be >= 0")
 		return exitCodeInvalidUsage
 	}
 	if *depthMin < -1 || *depthMax < -1 {
@@ -614,11 +631,15 @@ func (a *App) runQuery(args []string) int {
 		Limit:      *limit,
 		CandidateK: *candidateK,
 		Expand:     *expand,
+		MaxPerPage: *maxPerPage,
+		Group:      *group,
+		Facets:     facetList,
 		Embedding:  embeddingOptions,
 		Filters: db.SearchFilters{
 			SpaceKey:       firstSpace(*spaceList),
 			Spaces:         []string(*spaceList),
 			PageID:         *pageID,
+			ParentID:       *parent,
 			FromDate:       *fromDate,
 			ToDate:         *toDate,
 			Host:           *host,
@@ -661,6 +682,9 @@ func (a *App) runQuery(args []string) int {
 			"offset": req.Offset,
 			"limit":  req.Limit,
 		}
+		if len(queryResp.Facets) > 0 {
+			payload["facets"] = queryResp.Facets
+		}
 		if *explain {
 			payload["explain"] = buildExplainSummary(results, req)
 		}
@@ -671,6 +695,9 @@ func (a *App) runQuery(args []string) int {
 
 	if len(results) == 0 {
 		fmt.Println("no results")
+		// Facets describe the matching set, so an offset past the end of the results
+		// cannot hide them: the JSON payload still carries them for the same reason.
+		printFacetBlock(req.Facets, queryResp.Facets)
 		return exitCodeOK
 	}
 
@@ -684,6 +711,8 @@ func (a *App) runQuery(args []string) int {
 		fmt.Printf("   text=%s\n", summarizeText(res.ChunkText, 240))
 	}
 
+	printFacetBlock(req.Facets, queryResp.Facets)
+
 	if *explain {
 		fmt.Println()
 		fmt.Println("explain:")
@@ -693,6 +722,29 @@ func (a *App) runQuery(args []string) int {
 	}
 
 	return exitCodeOK
+}
+
+// printFacetBlock writes the text facets block. The empty-page path and the normal path
+// share it, so an offset past the end of the results cannot hide counts that the JSON
+// payload still carries.
+func printFacetBlock(dimensions []string, facets query.Facets) {
+	if len(facets) == 0 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("facets:")
+	for _, dimension := range dimensions {
+		buckets := facets.SortedBuckets(dimension)
+		if len(buckets) == 0 {
+			continue
+		}
+		parts := make([]string, 0, len(buckets))
+		for _, bucket := range buckets {
+			parts = append(parts, fmt.Sprintf("%s=%d", bucket.Bucket, bucket.Count))
+		}
+		fmt.Printf("- %s: %s\n", dimension, strings.Join(parts, ", "))
+	}
 }
 
 func (a *App) runStats(args []string) int {

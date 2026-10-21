@@ -163,6 +163,232 @@ func TestRunQueryPaginationJSON(t *testing.T) {
 	}
 }
 
+func TestRunQueryParentFilterJSON(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "parent.md", "title": "Parent", "space_key": "ENG"},
+    "2": {"local_path": "child.md", "title": "Child", "space_key": "ENG", "confluence_parent_id": "1"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "parent.md"), []byte("# parent\n\nbanana parent"), 0644); err != nil {
+		t.Fatalf("write parent markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "child.md"), []byte("# child\n\nbanana child"), 0644); err != nil {
+		t.Fatalf("write child markdown: %v", err)
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	queryOutput := captureStdout(t, func() {
+		exit := app.Run([]string{
+			"query",
+			"--db", filepath.Join(dir, defaultDBFileName),
+			"--q", "banana",
+			"--parent", "1",
+			"--json",
+		})
+		if exit != exitCodeOK {
+			t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+		}
+	})
+
+	if !strings.Contains(queryOutput, `"ParentID": "1"`) {
+		t.Fatalf("expected the parent filter in the echoed request, output=%s", queryOutput)
+	}
+	if !strings.Contains(queryOutput, `"pageId": "2"`) {
+		t.Fatalf("expected the direct child in the results, output=%s", queryOutput)
+	}
+	if strings.Contains(queryOutput, `"pageId": "1"`) {
+		t.Fatalf("expected the parent page to be excluded, output=%s", queryOutput)
+	}
+}
+
+func TestRunQueryMaxPerPageJSON(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# banana\n\nbanana one\n\n## two\n\nbanana two"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	query := func(args ...string) string {
+		t.Helper()
+
+		return captureStdout(t, func() {
+			runArgs := append([]string{"query", "--db", filepath.Join(dir, defaultDBFileName), "--q", "banana", "--top-k", "10", "--json"}, args...)
+			if exit := app.Run(runArgs); exit != exitCodeOK {
+				t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+			}
+		})
+	}
+
+	if uncapped := query(); !strings.Contains(uncapped, `"count": 2`) {
+		t.Fatalf("expected both chunks of the page by default, output=%s", uncapped)
+	}
+
+	capped := query("--max-per-page", "1")
+	if !strings.Contains(capped, `"count": 1`) {
+		t.Fatalf("expected the cap to keep one chunk, output=%s", capped)
+	}
+	if !strings.Contains(capped, `"MaxPerPage": 1`) {
+		t.Fatalf("expected the cap in the echoed request, output=%s", capped)
+	}
+}
+
+func TestRunQueryMaxPerPageValidation(t *testing.T) {
+	app := newTestApp(t)
+	if exit := app.Run([]string{"query", "--q", "abc", "--max-per-page", "-1"}); exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+}
+
+func TestRunQueryGroupDocumentJSON(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# banana\n\nbanana one\n\n## two\n\nbanana two"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	queryOutput := captureStdout(t, func() {
+		exit := app.Run([]string{
+			"query",
+			"--db", filepath.Join(dir, defaultDBFileName),
+			"--q", "banana",
+			"--group", "document",
+			"--json",
+		})
+		if exit != exitCodeOK {
+			t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+		}
+	})
+
+	if !strings.Contains(queryOutput, `"Group": "document"`) {
+		t.Fatalf("expected the group in the echoed request, output=%s", queryOutput)
+	}
+	if !strings.Contains(queryOutput, `"count": 1`) {
+		t.Fatalf("expected one result for the page, output=%s", queryOutput)
+	}
+	if !strings.Contains(queryOutput, `"chunkCount": 2`) {
+		t.Fatalf("expected the chunk count of the page, output=%s", queryOutput)
+	}
+}
+
+func TestRunQueryGroupValidation(t *testing.T) {
+	app := newTestApp(t)
+	if exit := app.Run([]string{"query", "--q", "abc", "--group", "chunk"}); exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+}
+
+func TestRunQueryFacetsJSONAndText(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG", "created_by_name": "Ada Lovelace", "last_modified_by_name": "Ada Lovelace"},
+    "2": {"local_path": "b.md", "title": "Beta", "space_key": "OPS", "created_by_name": "Grace Hopper", "last_modified_by_name": "Grace Hopper"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# banana\n\nbanana text"), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	query := func(args ...string) string {
+		t.Helper()
+
+		return captureStdout(t, func() {
+			runArgs := append([]string{"query", "--db", filepath.Join(dir, defaultDBFileName), "--q", "banana"}, args...)
+			if exit := app.Run(runArgs); exit != exitCodeOK {
+				t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+			}
+		})
+	}
+
+	jsonOutput := query("--facets", "space,author", "--json")
+	for _, want := range []string{
+		`"Facets": [`,
+		`"facets": {`,
+		`"ENG": 1`,
+		`"OPS": 1`,
+		`"Ada Lovelace": 1`,
+		`"Grace Hopper": 1`,
+	} {
+		if !strings.Contains(jsonOutput, want) {
+			t.Fatalf("expected %s in the json output, output=%s", want, jsonOutput)
+		}
+	}
+
+	textOutput := query("--facets", "space,author")
+	for _, want := range []string{"facets:", "- space: ENG=1, OPS=1", "- author: Ada Lovelace=1, Grace Hopper=1"} {
+		if !strings.Contains(textOutput, want) {
+			t.Fatalf("expected %q in the text output, output=%s", want, textOutput)
+		}
+	}
+
+	// An offset past the end of the results still has a matching set behind it, so the
+	// counts have to survive in both outputs.
+	emptyJSON := query("--facets", "space", "--top-k", "1", "--offset", "1", "--json")
+	if !strings.Contains(emptyJSON, `"count": 0`) {
+		t.Fatalf("expected an empty page, output=%s", emptyJSON)
+	}
+	if !strings.Contains(emptyJSON, `"facets"`) {
+		t.Fatalf("expected the facets in the empty page json, output=%s", emptyJSON)
+	}
+
+	emptyText := query("--facets", "space", "--top-k", "1", "--offset", "1")
+	for _, want := range []string{"no results", "facets:", "- space: ENG=1, OPS=1"} {
+		if !strings.Contains(emptyText, want) {
+			t.Fatalf("expected %q in the empty page text output, output=%s", want, emptyText)
+		}
+	}
+}
+
+func TestRunQueryFacetsValidation(t *testing.T) {
+	app := newTestApp(t)
+	if exit := app.Run([]string{"query", "--q", "abc", "--facets", "label"}); exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+}
+
 func TestRunQueryExplainSuccess(t *testing.T) {
 	dir := t.TempDir()
 	metadata := `{

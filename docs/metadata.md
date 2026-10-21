@@ -46,6 +46,11 @@ why `--depth-min 1` is the documented way to exclude seed pages.
 mode, and the seed and page counts. `stats` reports the most recent one next to a
 metadata coverage summary; `index` stays silent about it.
 
+`canonical_url` is read back out on the query path: every result carries `canonicalUrl`
+when the crawler stored one, and omits the field when it did not. `sourceUrl` is
+unchanged, so a caller that wants the page the crawler considered authoritative no longer
+has to reconstruct it.
+
 ### Freshness and coverage
 
 `stats` answers two questions about an index:
@@ -126,6 +131,7 @@ passed changes nothing:
 | --- | --- | --- |
 | `--space <key>` (repeatable) | `Spaces` | any of these `space_key` values |
 | `--page-id <id>` | `PageID` | one page |
+| `--parent <id>` | `ParentID` | the direct children of one page; a page with no parent id never matches. A recursive subtree filter is not part of this flag |
 | `--host <host>` | `Host` | one crawled site; matters when a corpus spans hosts, where space keys can repeat |
 | `--author <name>` | `Author` | creator *or* last modifier, case-insensitive |
 | `--created-by <name>` | `CreatedBy` | creator only |
@@ -146,6 +152,52 @@ Both channels are min-max normalised and then combined (weighted `--alpha`, or
 `--fusion rrf`). A channel is only consulted when it produced a positive score: rows
 with no similarity at all are dropped, while the weakest *real* match is kept, because
 normalisation maps it to exactly zero.
+
+### Result shaping
+
+Text relevance and fusion decide *which* rows rank where; these options change the shape
+of the result set afterwards, never the scores:
+
+| flag | meaning |
+| --- | --- |
+| `--max-per-page N` | at most N chunks of the same document in the ranked list; `0` (default) means unlimited |
+| `--group document` | one result per page instead of one per chunk |
+| `--facets space,author` | per-bucket document counts for the matching set |
+
+The cap is applied after fusion and priors and before `--top-k`, so the slots a long page
+would have taken with near-duplicate passages go to other documents, and `total` counts
+what is left. Both `total` and `count` describe the shaped set: `count` is the page you
+received, `total` is the ranked list before `--offset`/`--limit`.
+
+`--group document` keeps the chunk-level contract as the default and adds a page-level
+view. Each result carries the page's highest-scoring chunk, that chunk's score as the
+page score (ties keep the existing chunk-id order), and `chunkCount`, the number of the
+page's chunks that matched. `total` counts documents in this mode, `--max-per-page` is a
+no-op because a page is already represented once, and the result remains deterministic.
+
+`--facets space,author` answers "what does this search actually touch". Counts are
+documents, not chunks: a page with five matching chunks counts once. They describe the
+whole matching set of the retrieval window, not the returned page, so a `--top-k 1`
+request still reports the full shape of what matched; they never change ranking, scores or
+`total`, and the block is omitted entirely when the flag is not passed. Author buckets
+follow `--author`: a page counts for its creator and for its last modifier, so filtering
+by a person and faceting on authors agree. An empty value (a page the crawler reported no
+space or author for) adds no bucket. Author names are grouped case-insensitively under the
+first spelling seen, because `--author` matches that way; space keys keep their exact
+spelling, because `--space` is case-sensitive.
+
+The retrieval window is `--candidate-k` per channel (default 50), so that is how many
+matches a bucket can count. Raise it to widen the counted pool:
+
+```sh
+confluence2md-indexer query --db ./confluence2md-index.db --q "rotate secrets" \
+  --facets space,author --candidate-k 500
+```
+
+Counting every row the filters admit would make vector and hybrid facets report the
+corpus's space and author distribution, because the vector channel scores every embedded
+chunk instead of matching a predicate. If you need corpus-wide counts, `stats` is the
+right source, not a query.
 
 ### Ranking priors
 

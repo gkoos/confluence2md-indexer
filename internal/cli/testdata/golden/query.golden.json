@@ -27,6 +27,7 @@
   },
   "results": [
     {
+      "canonicalUrl": "https://example.test/pages/1001-canonical",
       "chunkId": "1001:000000",
       "chunkIndex": 0,
       "chunkText": "# Golden Apple Page\n\nThis page contains apple and banana examples for deterministic hybrid retrieval tests.",

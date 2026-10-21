@@ -175,6 +175,60 @@ Notes:
 - `--offset` is zero-based.
 - `--limit 0` means use `--top-k`.
 
+Keep at most one passage per page, so the top of a small `--top-k` covers several pages
+instead of repeating one:
+
+```sh
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "incident" --max-per-page 1
+```
+
+`--max-per-page 0` (the default) is unlimited. The cap runs after ranking and before
+`--top-k`, so `total` and `count` both describe the capped list.
+
+## One Result Per Page
+
+Ask which page answers a question rather than which passage:
+
+```sh
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "certificate renewal" \
+  --group document --top-k 5
+```
+
+Each result keeps the page's highest-scoring chunk and adds `chunkCount`, the number of
+the page's chunks that matched. The score stays chunk-level and is the maximum over the
+page, ties keep the chunk-id order, and `total` counts documents in this mode.
+`--max-per-page` has no effect here, because a page is already represented once.
+
+## Summarise a Result Set
+
+See which spaces and people a search actually touches before paging through it:
+
+```sh
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "rotate secrets" \
+  --facets space,author --top-k 5 --json
+```
+
+```json
+"facets": {
+  "space": {"SRE": 4, "OPS": 1},
+  "author": {"Ada Lovelace": 3, "Grace Hopper": 2}
+}
+```
+
+Counts are documents over the whole matching set of the retrieval window, not the page you
+received, so `--top-k 1` reports the same facets as `--top-k 50`. Text output prints a
+short block instead:
+
+```text
+facets:
+- space: SRE=4, OPS=1
+- author: Ada Lovelace=3, Grace Hopper=2
+```
+
+Facets never affect ranking, scores or `total`. The window they count is `--candidate-k`
+per channel (default 50), so raise it when you need a wider pool; counting beyond the
+retrieval window would make vector and hybrid facets a corpus distribution.
+
 ## Context Expansion
 
 Include one adjacent chunk on each side of ranked hits:
@@ -216,6 +270,10 @@ The payload includes:
 - `pagination`
 - `results`
 
+Each result carries `canonicalUrl` when the crawler recorded a canonical link for the
+page, and omits the field when it did not. Use it as the link to open; `sourceUrl` keeps
+the URL the page was crawled from.
+
 ## Common Validation Errors
 
 - Missing query: `query requires --q`
@@ -248,7 +306,15 @@ confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --see
 
 # one level below the seeds
 confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --depth-min 1 --depth-max 1
+
+# the direct children of one page
+confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --parent 123456
 ```
+
+`--parent` matches the page id stored in `documents.parent_id`, which comes from
+`confluence_parent_id` in `metadata.json` or the page front matter. It returns direct
+children only: a page without a stored parent id never matches, and a recursive subtree
+filter is not available.
 
 ## Narrow by content shape and freshness
 

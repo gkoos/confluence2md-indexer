@@ -29,13 +29,13 @@ func seedFilterCorpus(t *testing.T, database *sql.DB) {
 			ID: "2", PageID: "2", Title: "Child page", LocalPath: "2.md", SpaceKey: "OPS",
 			SourceURL: "https://example.test/2", LastModifiedAt: "2025-01-01T10:00:00Z",
 			ContentHash: "h-2", MetadataHash: "m-2", Host: "a.test", Depth: 1, IsSeed: false,
-			CreatedByName: "Grace Hopper", ModifiedByName: "Ada Lovelace", Attachments: 0,
+			ParentID: "1", CreatedByName: "Grace Hopper", ModifiedByName: "Ada Lovelace", Attachments: 0,
 		},
 		{
 			ID: "3", PageID: "3", Title: "Other space", LocalPath: "3.md", SpaceKey: "ENG",
 			SourceURL: "https://example.test/3", LastModifiedAt: "2026-06-01T10:00:00Z",
 			ContentHash: "h-3", MetadataHash: "m-3", Host: "b.test", Depth: 2, IsSeed: false,
-			CreatedByName: "Ada Lovelace", ModifiedByName: "Grace Hopper", Attachments: 1,
+			ParentID: "2", CreatedByName: "Ada Lovelace", ModifiedByName: "Grace Hopper", Attachments: 1,
 		},
 	}
 
@@ -77,6 +77,11 @@ func TestSearchLexicalNarrowsByMetadata(t *testing.T) {
 		"has attachments":    {SearchFilters{HasAttachments: true}, []string{"1", "3"}},
 		"updated since":      {SearchFilters{UpdatedSince: "2026-01-01T00:00:00Z"}, []string{"1", "3"}},
 		"page id":            {SearchFilters{PageID: "2"}, []string{"2"}},
+		// Page 3 is a child of page 2, so a parent filter stops at the direct
+		// children and never reaches a grandchild. Page 1 has no parent id.
+		"parent":       {SearchFilters{ParentID: "1"}, []string{"2"}},
+		"parent leaf":  {SearchFilters{ParentID: "3"}, []string{}},
+		"parent blank": {SearchFilters{ParentID: "  "}, []string{"1", "2", "3"}},
 	}
 
 	for name, tc := range cases {
@@ -129,6 +134,8 @@ func TestSearchVectorNarrowsByMetadata(t *testing.T) {
 		"seed only":   {SearchFilters{SeedOnly: true}, []string{"1"}},
 		"host":        {SearchFilters{Host: "b.test"}, []string{"3"}},
 		"depth range": {SearchFilters{DepthMin: intPointer(1), DepthMax: intPointer(1)}, []string{"2"}},
+		"parent":      {SearchFilters{ParentID: "1"}, []string{"2"}},
+		"parent leaf": {SearchFilters{ParentID: "3"}, []string{}},
 	}
 
 	for name, tc := range cases {

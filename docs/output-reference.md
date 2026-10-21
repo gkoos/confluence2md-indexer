@@ -97,6 +97,17 @@ Per result block:
 - `path=<localPath>`
 - `text=<chunkText summary>`
 
+After the result list, an optional facets block appears when `--facets` is used:
+
+```text
+facets:
+- space: SRE=4, OPS=1
+- author: Ada Lovelace=3, Grace Hopper=2
+```
+
+Buckets are ordered by count descending and then by name, so the same query always prints
+the same block.
+
 Example:
 
 ```text
@@ -181,12 +192,15 @@ Top-level fields:
 - `total`
 - `results`
 - `pagination`
+- optional `facets` when `--facets` is used: per-dimension document counts for the
+  matching set, keyed by dimension and then by bucket value
 - optional `explain` when `--explain` is used
 
 Important counters:
 
 - `count`: number of results in this page.
-- `total`: total results available after ranking and scoring filters.
+- `total`: total results available after ranking and scoring filters, including the
+  `--max-per-page` cap; in `--group document` mode it counts documents rather than chunks.
 
 `pagination`:
 
@@ -203,9 +217,11 @@ Result object fields:
 - `localPath`
 - `spaceKey`
 - `sourceUrl`
+- optional `canonicalUrl` when the crawler recorded one; it is the link to open and is never reconstructed from `sourceUrl`
 - `chunkText`
 - optional `baseChunkText` when context expansion is applied
 - `chunkIndex`
+- optional `chunkCount` in `--group document` mode: how many of the page's chunks matched
 - optional `contextStartIndex`, `contextEndIndex`, `contextChunkCount`
 - `lexicalScore`
 - `vectorScore`

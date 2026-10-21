@@ -323,8 +323,11 @@ type SearchFilters struct {
 	SpaceKey string
 	// Spaces narrows to any of several spaces and wins over SpaceKey when both are
 	// set, because a caller that fills both means "these spaces".
-	Spaces   []string `json:",omitempty"`
-	PageID   string
+	Spaces []string `json:",omitempty"`
+	PageID string
+	// ParentID keeps the direct children of one page. A page the crawler reported
+	// no parent for stores an empty value, which can never equal a requested id.
+	ParentID string `json:",omitempty"`
 	FromDate string
 	ToDate   string
 	// Host narrows to one crawled site, which matters for corpora that span hosts,
@@ -388,6 +391,7 @@ func filterClauses(filters SearchFilters) ([]string, []any) {
 		value  string
 	}{
 		{"d.page_id", filters.PageID},
+		{"d.parent_id", filters.ParentID},
 		{"d.host", filters.Host},
 	} {
 		if value := strings.TrimSpace(predicate.value); value != "" {
