@@ -187,7 +187,7 @@ Important counters:
 
 - `count`: number of results in this page.
 - `total`: total results available after ranking and scoring filters, including the
-  `--max-per-page` cap.
+  `--max-per-page` cap; in `--group document` mode it counts documents rather than chunks.
 
 `pagination`:
 
@@ -208,6 +208,7 @@ Result object fields:
 - `chunkText`
 - optional `baseChunkText` when context expansion is applied
 - `chunkIndex`
+- optional `chunkCount` in `--group document` mode: how many of the page's chunks matched
 - optional `contextStartIndex`, `contextEndIndex`, `contextChunkCount`
 - `lexicalScore`
 - `vectorScore`

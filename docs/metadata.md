@@ -161,11 +161,18 @@ of the result set afterwards, never the scores:
 | flag | meaning |
 | --- | --- |
 | `--max-per-page N` | at most N chunks of the same document in the ranked list; `0` (default) means unlimited |
+| `--group document` | one result per page instead of one per chunk |
 
 The cap is applied after fusion and priors and before `--top-k`, so the slots a long page
 would have taken with near-duplicate passages go to other documents, and `total` counts
 what is left. Both `total` and `count` describe the shaped set: `count` is the page you
 received, `total` is the ranked list before `--offset`/`--limit`.
+
+`--group document` keeps the chunk-level contract as the default and adds a page-level
+view. Each result carries the page's highest-scoring chunk, that chunk's score as the
+page score (ties keep the existing chunk-id order), and `chunkCount`, the number of the
+page's chunks that matched. `total` counts documents in this mode, `--max-per-page` is a
+no-op because a page is already represented once, and the result remains deterministic.
 
 ### Ranking priors
 

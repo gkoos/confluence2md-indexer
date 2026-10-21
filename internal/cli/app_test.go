@@ -260,6 +260,56 @@ func TestRunQueryMaxPerPageValidation(t *testing.T) {
 	}
 }
 
+func TestRunQueryGroupDocumentJSON(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "a.md", "title": "Alpha", "space_key": "ENG"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# banana\n\nbanana one\n\n## two\n\nbanana two"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	queryOutput := captureStdout(t, func() {
+		exit := app.Run([]string{
+			"query",
+			"--db", filepath.Join(dir, defaultDBFileName),
+			"--q", "banana",
+			"--group", "document",
+			"--json",
+		})
+		if exit != exitCodeOK {
+			t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+		}
+	})
+
+	if !strings.Contains(queryOutput, `"Group": "document"`) {
+		t.Fatalf("expected the group in the echoed request, output=%s", queryOutput)
+	}
+	if !strings.Contains(queryOutput, `"count": 1`) {
+		t.Fatalf("expected one result for the page, output=%s", queryOutput)
+	}
+	if !strings.Contains(queryOutput, `"chunkCount": 2`) {
+		t.Fatalf("expected the chunk count of the page, output=%s", queryOutput)
+	}
+}
+
+func TestRunQueryGroupValidation(t *testing.T) {
+	app := newTestApp(t)
+	if exit := app.Run([]string{"query", "--q", "abc", "--group", "chunk"}); exit != exitCodeInvalidUsage {
+		t.Fatalf("expected exit %d got %d", exitCodeInvalidUsage, exit)
+	}
+}
+
 func TestRunQueryExplainSuccess(t *testing.T) {
 	dir := t.TempDir()
 	metadata := `{

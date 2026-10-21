@@ -91,7 +91,7 @@ confluence2md-indexer query --q text
   [--mode hybrid|lexical|vector]
   [--fusion weighted|rrf] [--alpha 0..1] [--rrf-k N]
   [--top-k N] [--candidate-k N]
-  [--max-per-page N]
+  [--max-per-page N] [--group document]
   [--offset N] [--limit N]
   [--space key] [--host host] [--page-id id] [--parent id]
   [--author name] [--created-by name] [--modified-by name]
@@ -120,6 +120,9 @@ The crawler metadata is indexed too, so a query can be narrowed by what it descr
 them are opt-in, and all of them apply to every retrieval mode. `--max-per-page N` caps
 how many chunks of one page a result set may contain, which stops a long page from
 filling a small `--top-k` with near-duplicate passages; `0` (the default) means unlimited.
+`--group document` switches the result granularity: one result per page, carrying its
+highest-scoring chunk and a `chunkCount`, which is the shape an agent-facing caller wants
+when the question is "which page answers this" rather than "which passage".
 Ranking can be nudged by
 the same metadata with `--priors recency,authority,seed,depth,richness`, which is off by
 default and bounded by `--prior-strength`. Retrieval defaults — mode, fusion, alpha,

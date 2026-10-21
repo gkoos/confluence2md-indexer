@@ -17,6 +17,10 @@ var Modes = []string{"hybrid", "lexical", "vector"}
 // Fusions lists the fusion strategies a request may select.
 var Fusions = []string{"weighted", "rrf"}
 
+// Groups lists the result granularities a request may select. Chunk-level results are
+// the default, so an empty Group means "chunk".
+var Groups = []string{"document"}
+
 type Request struct {
 	Text       string
 	Mode       string
@@ -33,7 +37,10 @@ type Request struct {
 	// omitted from the echoed request when unset, so an opt-in shaping option never
 	// changes the default JSON contract.
 	MaxPerPage int `json:",omitempty"`
-	Filters    db.SearchFilters
+	// Group selects the result granularity. "document" returns one result per page,
+	// carrying its best chunk; empty keeps the chunk-level contract.
+	Group   string `json:",omitempty"`
+	Filters db.SearchFilters
 	// Embedding configures provider resolution for this query. It is not part of
 	// the request contract: the command or API layer fills it in.
 	Embedding embedding.Options `json:"-"`
@@ -68,6 +75,9 @@ type Result struct {
 	// MetadataFactors holds the normalised value of every enabled prior for this
 	// result, which makes the adjustment explainable.
 	MetadataFactors map[string]float64 `json:"metadataFactors,omitempty"`
+	// ChunkCount is how many of the page's chunks matched. It is set only in document
+	// grouping, where one result stands for the whole page.
+	ChunkCount int `json:"chunkCount,omitempty"`
 }
 
 func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req Request) ([]Result, int, error) {
@@ -148,6 +158,12 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 	}
 
 	allResults := fuse(req, lexical, vector)
+	// Grouping collapses each page to its best chunk before the cap runs, which is
+	// why --max-per-page is a no-op in this mode: there is already one row per
+	// document, and chunkCount still reports every chunk that matched.
+	if req.Group == "document" {
+		allResults = groupByDocument(allResults)
+	}
 	// The per-page cap runs before truncation, so the slots a long page would have
 	// taken with near-duplicate passages go to other documents instead.
 	allResults = capPerDocument(allResults, req.MaxPerPage)
@@ -169,6 +185,35 @@ func Run(ctx context.Context, database *sql.DB, provider embedding.Provider, req
 		results[i].Rank = start + i + 1
 	}
 	return results, total, nil
+}
+
+// groupByDocument collapses the ranked chunks into one result per page. The input is
+// already sorted, so the first chunk of a document is its highest-scoring one and its
+// score becomes the page's score; equal page scores keep the existing chunk-id order.
+// ChunkCount records how many of the page's chunks matched, so a caller can tell a
+// one-passage page from a page that dominated the ranking.
+func groupByDocument(results []Result) []Result {
+	if len(results) == 0 {
+		return results
+	}
+
+	counts := make(map[string]int, len(results))
+	for _, result := range results {
+		counts[result.DocumentID]++
+	}
+
+	grouped := make([]Result, 0, len(counts))
+	seen := make(map[string]bool, len(counts))
+	for _, result := range results {
+		if seen[result.DocumentID] {
+			continue
+		}
+		seen[result.DocumentID] = true
+		result.ChunkCount = counts[result.DocumentID]
+		grouped = append(grouped, result)
+	}
+
+	return grouped
 }
 
 // capPerDocument keeps at most maxPerPage chunks of one document in the ranked

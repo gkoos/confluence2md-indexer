@@ -435,6 +435,7 @@ func (a *App) runQuery(args []string) int {
 	toDate := fs.String("to", "", "Upper bound for last_modified_at (YYYY-MM-DD)")
 	expand := fs.Int("expand", 0, "Adjacent chunk expansion count")
 	maxPerPage := fs.Int("max-per-page", 0, "Cap chunks per document in the results (0 means unlimited)")
+	group := fs.String("group", "", "Result granularity: document (one result per page); unset keeps chunks")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON results")
 	explain := fs.Bool("explain", false, "Include score breakdown and diagnostics")
 	lexicalOnly := fs.Bool("lexical-only", false, "Force lexical retrieval, requiring no embedding provider")
@@ -530,6 +531,10 @@ func (a *App) runQuery(args []string) int {
 		fmt.Fprintf(os.Stderr, "query --fusion must be one of: %s\n", strings.Join(query.Fusions, ", "))
 		return exitCodeInvalidUsage
 	}
+	if *group != "" && !isOneOf(*group, query.Groups...) {
+		fmt.Fprintf(os.Stderr, "query --group must be one of: %s\n", strings.Join(query.Groups, ", "))
+		return exitCodeInvalidUsage
+	}
 	if *alpha < 0 || *alpha > 1 {
 		fmt.Fprintln(os.Stderr, "query --alpha must be between 0 and 1")
 		return exitCodeInvalidUsage
@@ -621,6 +626,7 @@ func (a *App) runQuery(args []string) int {
 		CandidateK: *candidateK,
 		Expand:     *expand,
 		MaxPerPage: *maxPerPage,
+		Group:      *group,
 		Embedding:  embeddingOptions,
 		Filters: db.SearchFilters{
 			SpaceKey:       firstSpace(*spaceList),

@@ -185,6 +185,20 @@ confluence2md-indexer query --db ./output/confluence2md-index.db --q "incident" 
 `--max-per-page 0` (the default) is unlimited. The cap runs after ranking and before
 `--top-k`, so `total` and `count` both describe the capped list.
 
+## One Result Per Page
+
+Ask which page answers a question rather than which passage:
+
+```sh
+confluence2md-indexer query --db ./output/confluence2md-index.db --q "certificate renewal" \
+  --group document --top-k 5
+```
+
+Each result keeps the page's highest-scoring chunk and adds `chunkCount`, the number of
+the page's chunks that matched. The score stays chunk-level and is the maximum over the
+page, ties keep the chunk-id order, and `total` counts documents in this mode.
+`--max-per-page` has no effect here, because a page is already represented once.
+
 ## Context Expansion
 
 Include one adjacent chunk on each side of ranked hits:

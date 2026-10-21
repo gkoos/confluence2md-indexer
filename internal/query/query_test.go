@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -17,7 +18,8 @@ var queryModes = []string{"lexical", "vector", "hybrid"}
 
 // runInModes runs one request per retrieval mode, so a result-shaping change cannot
 // work in the mode it was written for and silently break the others. Each mode gets
-// its own subtest, so a failure names the mode.
+// its own subtest, so a failure names the mode, and every mode runs twice because a
+// shaped result set has to be reproducible row for row.
 func runInModes(t *testing.T, database *sql.DB, request Request, check func(t *testing.T, results []Result, total int)) {
 	t.Helper()
 
@@ -28,6 +30,14 @@ func runInModes(t *testing.T, database *sql.DB, request Request, check func(t *t
 			results, total, err := Run(context.Background(), database, embeddingtest.New(8), request)
 			if err != nil {
 				t.Fatalf("run %s query: %v", mode, err)
+			}
+
+			again, againTotal, err := Run(context.Background(), database, embeddingtest.New(8), request)
+			if err != nil {
+				t.Fatalf("run %s query again: %v", mode, err)
+			}
+			if againTotal != total || !reflect.DeepEqual(again, results) {
+				t.Fatalf("%s results are not deterministic: %+v then %+v", mode, results, again)
 			}
 
 			check(t, results, total)
@@ -269,6 +279,157 @@ func sortedByFused(results []Result) bool {
 	}
 
 	return true
+}
+
+func TestRunGroupDocumentReturnsOneResultPerPage(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	// "left neighbor" is p3's first chunk, so the vector channel scores that page
+	// positively too, and lexical retrieval matches its last chunk as well.
+	runInModes(t, database, Request{
+		Text:       "left neighbor",
+		TopK:       10,
+		CandidateK: 10,
+		Group:      "document",
+	}, func(t *testing.T, results []Result, _ int) {
+		seen := map[string]bool{}
+		for _, result := range results {
+			if seen[result.DocumentID] {
+				t.Fatalf("document %s appeared more than once: %+v", result.DocumentID, results)
+			}
+			seen[result.DocumentID] = true
+			if result.ChunkCount < 1 {
+				t.Fatalf("expected chunkCount >= 1 on a grouped result: %+v", result)
+			}
+		}
+		if !seen["p3"] {
+			t.Fatalf("expected the multi-chunk page in the results, got %+v", results)
+		}
+		if !sortedByFused(results) {
+			t.Fatalf("expected the grouped results to stay in ranked order: %+v", results)
+		}
+	})
+}
+
+func TestRunGroupDocumentKeepsTheBestChunkAndCount(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	chunked, chunkedTotal, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "neighbor",
+		Mode:       "lexical",
+		TopK:       10,
+		CandidateK: 10,
+	})
+	if err != nil {
+		t.Fatalf("run chunked query: %v", err)
+	}
+	if chunkedTotal != 2 || len(chunked) != 2 {
+		t.Fatalf("expected both chunks of the page, got %d results (total %d)", len(chunked), chunkedTotal)
+	}
+
+	grouped, groupedTotal, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "neighbor",
+		Mode:       "lexical",
+		TopK:       10,
+		CandidateK: 10,
+		Group:      "document",
+	})
+	if err != nil {
+		t.Fatalf("run grouped query: %v", err)
+	}
+	if groupedTotal != 1 || len(grouped) != 1 {
+		t.Fatalf("expected one document, got %d results (total %d)", len(grouped), groupedTotal)
+	}
+	if grouped[0].ChunkID != chunked[0].ChunkID {
+		t.Fatalf("expected the best chunk %s to represent the page, got %s", chunked[0].ChunkID, grouped[0].ChunkID)
+	}
+	if grouped[0].ChunkCount != 2 {
+		t.Fatalf("expected chunkCount 2 for the page, got %d", grouped[0].ChunkCount)
+	}
+	if grouped[0].Fused != chunked[0].Fused {
+		t.Fatalf("expected the page score to be the best chunk score, got %.4f", grouped[0].Fused)
+	}
+
+	// A cap cannot remove a page that is already represented once, so the two
+	// options compose without changing the grouped result.
+	capped, cappedTotal, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "neighbor",
+		Mode:       "lexical",
+		TopK:       10,
+		CandidateK: 10,
+		Group:      "document",
+		MaxPerPage: 1,
+	})
+	if err != nil {
+		t.Fatalf("run grouped query with cap: %v", err)
+	}
+	if cappedTotal != groupedTotal || !reflect.DeepEqual(capped, grouped) {
+		t.Fatalf("expected --max-per-page to be a no-op in group mode, got %+v", capped)
+	}
+}
+
+func TestRunGroupDocumentCountsDocumentsAndPaginates(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	// "banana" hits p2 and "neighbor" hits two chunks of p3, so the grouped total
+	// counts documents while the chunked total counts rows.
+	results, total, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "banana neighbor",
+		Mode:       "lexical",
+		TopK:       10,
+		CandidateK: 10,
+		Group:      "document",
+	})
+	if err != nil {
+		t.Fatalf("run grouped query: %v", err)
+	}
+	if total != 2 || len(results) != 2 {
+		t.Fatalf("expected two documents, got %d results (total %d)", len(results), total)
+	}
+
+	documents := map[string]int{}
+	for _, result := range results {
+		documents[result.DocumentID] = result.ChunkCount
+	}
+	if documents["p2"] != 1 || documents["p3"] != 2 {
+		t.Fatalf("expected chunk counts p2=1 p3=2, got %v", documents)
+	}
+
+	paged, pagedTotal, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "banana neighbor",
+		Mode:       "lexical",
+		TopK:       10,
+		Offset:     1,
+		Limit:      1,
+		CandidateK: 10,
+		Group:      "document",
+	})
+	if err != nil {
+		t.Fatalf("run paged grouped query: %v", err)
+	}
+	if pagedTotal != 2 || len(paged) != 1 {
+		t.Fatalf("expected one document at offset 1 of 2, got %d results (total %d)", len(paged), pagedTotal)
+	}
+	if paged[0].Rank != 2 {
+		t.Fatalf("expected rank 2 after paging, got %d", paged[0].Rank)
+	}
+
+	again, _, err := Run(context.Background(), database, embeddingtest.New(8), Request{
+		Text:       "banana neighbor",
+		Mode:       "lexical",
+		TopK:       10,
+		CandidateK: 10,
+		Group:      "document",
+	})
+	if err != nil {
+		t.Fatalf("run repeated grouped query: %v", err)
+	}
+	if !reflect.DeepEqual(again, results) {
+		t.Fatalf("expected deterministic grouping, got %+v then %+v", results, again)
+	}
 }
 
 func TestRunExpandStitchesNeighborChunks(t *testing.T) {
