@@ -3,6 +3,7 @@ package indexerapi
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -97,8 +98,8 @@ func TestStatsReportsTheIndex(t *testing.T) {
 	if resp.SchemaVersion != OutputSchemaVersion || resp.Command != "stats" {
 		t.Fatalf("envelope = %q/%q, want %q/stats", resp.SchemaVersion, resp.Command, OutputSchemaVersion)
 	}
-	if !filepath.IsAbs(resp.DBPath) || resp.DBPath != filepath.Clean(dbPath) {
-		t.Fatalf("dbPath = %q, want the absolute path of %q", resp.DBPath, dbPath)
+	if resp.DBPath != dbPath {
+		t.Fatalf("dbPath = %q, want the supplied %q", resp.DBPath, dbPath)
 	}
 
 	// Freshness and coverage are the reason this API exists: the MCP server reads them
@@ -233,5 +234,29 @@ func TestStatsRefusesAnUnversionedIndex(t *testing.T) {
 	want := "database schema 0 is not the schema this build writes (1); rebuild the index with: confluence2md-indexer index <folder> --rebuild"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
+	}
+}
+
+// TestStatsPreservesTheSuppliedRelativePath guards the payload the command already
+// printed: stats echoes the --db value it was given, so resolving it would be a change.
+func TestStatsPreservesTheSuppliedRelativePath(t *testing.T) {
+	absPath := filepath.Join(t.TempDir(), "relative.db")
+	seedStatsIndex(t, absPath)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("working directory: %v", err)
+	}
+	relPath, err := filepath.Rel(cwd, absPath)
+	if err != nil {
+		t.Skipf("cannot express %q relative to %q: %v", absPath, cwd, err)
+	}
+
+	resp, err := Stats(context.Background(), relPath)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if resp.DBPath != relPath {
+		t.Fatalf("dbPath = %q, want the supplied %q", resp.DBPath, relPath)
 	}
 }

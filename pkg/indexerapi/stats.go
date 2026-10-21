@@ -32,8 +32,10 @@ func Stats(ctx context.Context, dbPath string) (*StatsResponse, error) {
 		return nil, fmt.Errorf("stats requires a non-empty --db path")
 	}
 
-	// Report the path the command reports - absolute, however the caller spelled it - so
-	// two callers of the same file produce the same payload.
+	// Open through an absolute path so the database resolves against the working
+	// directory once, but report the path the caller supplied: the command echoes its
+	// --db value (or its configured default), and rewriting it here would change the
+	// payload the docs promise is identical.
 	absPath, err := filepath.Abs(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve db path %q: %w", dbPath, err)
@@ -72,7 +74,7 @@ func Stats(ctx context.Context, dbPath string) (*StatsResponse, error) {
 	return &StatsResponse{
 		SchemaVersion: OutputSchemaVersion,
 		Command:       "stats",
-		DBPath:        absPath,
+		DBPath:        dbPath,
 		Stats:         stats,
 	}, nil
 }

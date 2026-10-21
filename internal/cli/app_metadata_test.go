@@ -460,6 +460,55 @@ func TestStatsOmitsCoverageAndCrawlWithoutData(t *testing.T) {
 	}
 }
 
+// TestRunStatsEchoesTheSuppliedDBPath locks the payload the command already printed:
+// --db is echoed verbatim, so resolving it to an absolute path would be a contract
+// change for anyone parsing dbPath.
+func TestRunStatsEchoesTheSuppliedDBPath(t *testing.T) {
+	app := newTestApp(t)
+	dir := writeIndexFixture(t, "# Doc\n\nbody text\n")
+	dbPath := filepath.Join(t.TempDir(), "index.db")
+
+	captureStdout(t, func() {
+		if exit := app.Run([]string{"index", dir, "--db", dbPath, "--json"}); exit != exitCodeOK {
+			t.Fatalf("index exit code: %d", exit)
+		}
+	})
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("working directory: %v", err)
+	}
+	relative, err := filepath.Rel(cwd, dbPath)
+	if err != nil {
+		t.Skipf("cannot express %q relative to %q: %v", dbPath, cwd, err)
+	}
+
+	raw := captureStdout(t, func() {
+		if exit := app.Run([]string{"stats", "--db", relative, "--json"}); exit != exitCodeOK {
+			t.Fatalf("stats exit code: %d", exit)
+		}
+	})
+
+	var payload struct {
+		DBPath string `json:"dbPath"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode stats output %q: %v", raw, err)
+	}
+	if payload.DBPath != relative {
+		t.Fatalf("dbPath = %q, want the supplied %q", payload.DBPath, relative)
+	}
+
+	text := captureStdout(t, func() {
+		if exit := app.Run([]string{"stats", "--db", relative}); exit != exitCodeOK {
+			t.Fatalf("stats exit code: %d", exit)
+		}
+	})
+	if !strings.Contains(text, "db path: "+relative) {
+		t.Fatalf("text output %q, want it to echo %q", text, relative)
+	}
+}
+
 func TestQueryUsesConfiguredDefaultsAndFlagsStillWin(t *testing.T) {
 	app := newTestApp(t)
 	dbPath := indexedFilterCorpus(t, app)
