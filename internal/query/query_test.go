@@ -12,6 +12,29 @@ import (
 	"github.com/gkoos/confluence2md-indexer/internal/embedding/embeddingtest"
 )
 
+// queryModes lists the retrieval modes every result-shaping behaviour must cover.
+var queryModes = []string{"lexical", "vector", "hybrid"}
+
+// runInModes runs one request per retrieval mode, so a result-shaping change cannot
+// work in the mode it was written for and silently break the others. Each mode gets
+// its own subtest, so a failure names the mode.
+func runInModes(t *testing.T, database *sql.DB, request Request, check func(t *testing.T, results []Result, total int)) {
+	t.Helper()
+
+	for _, mode := range queryModes {
+		t.Run(mode, func(t *testing.T) {
+			request.Mode = mode
+
+			results, total, err := Run(context.Background(), database, embeddingtest.New(8), request)
+			if err != nil {
+				t.Fatalf("run %s query: %v", mode, err)
+			}
+
+			check(t, results, total)
+		})
+	}
+}
+
 func TestRunHybridWeightedPrefersLexicalWithHighAlpha(t *testing.T) {
 	database := setupQueryTestDB(t)
 	seedQueryDocs(t, database)
@@ -122,6 +145,41 @@ func TestRunIncludesCanonicalURLOnlyWhenStored(t *testing.T) {
 	if results[0].SourceURL == "" {
 		t.Fatalf("expected sourceUrl to stay populated")
 	}
+}
+
+func TestRunParentFilterKeepsDirectChildren(t *testing.T) {
+	database := setupQueryTestDB(t)
+	seedQueryDocs(t, database)
+
+	// p2 is a child of p1 and p3 is a child of p2, so the filter must stop at the
+	// direct children. The query text is p2's own chunk, which keeps the vector
+	// channel's arbitrary stub scores out of the assertion.
+	runInModes(t, database, Request{
+		Text:       "banana banana yellow",
+		TopK:       10,
+		CandidateK: 10,
+		Filters:    db.SearchFilters{ParentID: "p1"},
+	}, func(t *testing.T, results []Result, _ int) {
+		if len(results) != 1 {
+			t.Fatalf("expected only the direct child, got %d results", len(results))
+		}
+		if results[0].PageID != "p2" {
+			t.Fatalf("expected page p2 got %s", results[0].PageID)
+		}
+	})
+
+	// A page with no children matches nothing, and the pages without a parent id
+	// (p1, whose parent is empty) never match a parent filter either.
+	runInModes(t, database, Request{
+		Text:       "banana banana yellow",
+		TopK:       10,
+		CandidateK: 10,
+		Filters:    db.SearchFilters{ParentID: "p3"},
+	}, func(t *testing.T, results []Result, total int) {
+		if len(results) != 0 || total != 0 {
+			t.Fatalf("expected no results, got %d (total %d)", len(results), total)
+		}
+	})
 }
 
 func TestRunExpandStitchesNeighborChunks(t *testing.T) {
@@ -365,6 +423,7 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 				SpaceKey:       "ENG",
 				SourceURL:      "https://example.test/p2",
 				CanonicalURL:   "https://example.test/pages/p2",
+				ParentID:       "p1",
 				LastModifiedAt: "2026-01-01T00:00:00Z",
 				ContentHash:    "h2",
 			},
@@ -378,6 +437,7 @@ func seedQueryDocs(t *testing.T, database *sql.DB) {
 				LocalPath:      "p3.md",
 				SpaceKey:       "ENG",
 				SourceURL:      "https://example.test/p3",
+				ParentID:       "p2",
 				LastModifiedAt: "2026-01-01T00:00:00Z",
 				ContentHash:    "h3",
 			},

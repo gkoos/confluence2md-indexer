@@ -252,7 +252,15 @@ confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --see
 
 # one level below the seeds
 confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --depth-min 1 --depth-max 1
+
+# the direct children of one page
+confluence2md-indexer query --db ./confluence2md-index.db --q "onboarding" --parent 123456
 ```
+
+`--parent` matches the page id stored in `documents.parent_id`, which comes from
+`confluence_parent_id` in `metadata.json` or the page front matter. It returns direct
+children only: a page without a stored parent id never matches, and a recursive subtree
+filter is not available.
 
 ## Narrow by content shape and freshness
 

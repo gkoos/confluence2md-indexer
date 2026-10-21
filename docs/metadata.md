@@ -131,6 +131,7 @@ passed changes nothing:
 | --- | --- | --- |
 | `--space <key>` (repeatable) | `Spaces` | any of these `space_key` values |
 | `--page-id <id>` | `PageID` | one page |
+| `--parent <id>` | `ParentID` | the direct children of one page; a page with no parent id never matches. A recursive subtree filter is not part of this flag |
 | `--host <host>` | `Host` | one crawled site; matters when a corpus spans hosts, where space keys can repeat |
 | `--author <name>` | `Author` | creator *or* last modifier, case-insensitive |
 | `--created-by <name>` | `CreatedBy` | creator only |

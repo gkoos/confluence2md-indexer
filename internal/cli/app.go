@@ -430,6 +430,7 @@ func (a *App) runQuery(args []string) int {
 	priorStrength := fs.Float64("prior-strength", 0, "Maximum relative score adjustment from priors (0..1; unset means the default)")
 	recencyHalfLife := fs.String("recency-half-life", "", "Age at which the recency prior falls to half, for example 180d or 6w")
 	pageID := fs.String("page-id", "", "Filter by page_id")
+	parent := fs.String("parent", "", "Filter by parent page id, keeping its direct children")
 	fromDate := fs.String("from", "", "Lower bound for last_modified_at (YYYY-MM-DD)")
 	toDate := fs.String("to", "", "Upper bound for last_modified_at (YYYY-MM-DD)")
 	expand := fs.Int("expand", 0, "Adjacent chunk expansion count")
@@ -619,6 +620,7 @@ func (a *App) runQuery(args []string) int {
 			SpaceKey:       firstSpace(*spaceList),
 			Spaces:         []string(*spaceList),
 			PageID:         *pageID,
+			ParentID:       *parent,
 			FromDate:       *fromDate,
 			ToDate:         *toDate,
 			Host:           *host,

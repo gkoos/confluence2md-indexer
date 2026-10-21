@@ -163,6 +163,53 @@ func TestRunQueryPaginationJSON(t *testing.T) {
 	}
 }
 
+func TestRunQueryParentFilterJSON(t *testing.T) {
+	dir := t.TempDir()
+	metadata := `{
+  "pages": {
+    "1": {"local_path": "parent.md", "title": "Parent", "space_key": "ENG"},
+    "2": {"local_path": "child.md", "title": "Child", "space_key": "ENG", "confluence_parent_id": "1"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "parent.md"), []byte("# parent\n\nbanana parent"), 0644); err != nil {
+		t.Fatalf("write parent markdown: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "child.md"), []byte("# child\n\nbanana child"), 0644); err != nil {
+		t.Fatalf("write child markdown: %v", err)
+	}
+
+	app := newTestApp(t)
+	if exit := app.Run([]string{"index", dir}); exit != exitCodeOK {
+		t.Fatalf("expected index exit %d got %d", exitCodeOK, exit)
+	}
+
+	queryOutput := captureStdout(t, func() {
+		exit := app.Run([]string{
+			"query",
+			"--db", filepath.Join(dir, defaultDBFileName),
+			"--q", "banana",
+			"--parent", "1",
+			"--json",
+		})
+		if exit != exitCodeOK {
+			t.Fatalf("expected query exit %d got %d", exitCodeOK, exit)
+		}
+	})
+
+	if !strings.Contains(queryOutput, `"ParentID": "1"`) {
+		t.Fatalf("expected the parent filter in the echoed request, output=%s", queryOutput)
+	}
+	if !strings.Contains(queryOutput, `"pageId": "2"`) {
+		t.Fatalf("expected the direct child in the results, output=%s", queryOutput)
+	}
+	if strings.Contains(queryOutput, `"pageId": "1"`) {
+		t.Fatalf("expected the parent page to be excluded, output=%s", queryOutput)
+	}
+}
+
 func TestRunQueryExplainSuccess(t *testing.T) {
 	dir := t.TempDir()
 	metadata := `{
