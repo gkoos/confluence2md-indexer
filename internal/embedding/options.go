@@ -76,6 +76,10 @@ type Options struct {
 	// Source records which configuration layer supplied the provider id. It is
 	// informational and surfaces as embedding.source in command output.
 	Source string
+	// envMerged says Merge built this value and already applied the environment as a
+	// layer. Resolve must not apply it again: that would resurrect values an explicit
+	// empty flag cleared and append environment headers twice.
+	envMerged bool
 }
 
 // Present records which fields a configuration layer actually supplied, so that
@@ -165,9 +169,16 @@ type envOptions struct {
 // withDefaults fills unset fields from the environment and then from built-in
 // defaults. It reports whether the provider id came from the environment.
 func (opts Options) withDefaults() (Options, bool, error) {
-	env, _, err := readEnvOptions()
-	if err != nil {
-		return opts, false, err
+	// Merge may already have applied the environment as a layer. Re-reading it here
+	// would overwrite a value an explicit empty flag deliberately cleared, and append
+	// environment headers a second time, so a merged configuration is left alone.
+	var env envOptions
+	if !opts.envMerged {
+		read, _, err := readEnvOptions()
+		if err != nil {
+			return opts, false, err
+		}
+		env = read
 	}
 
 	providerFromEnv := false

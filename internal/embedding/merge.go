@@ -31,6 +31,10 @@ func Merge(layers ...Layer) Options {
 	source := ""
 
 	for _, layer := range layers {
+		if layer.Name == SourceEnv {
+			// The environment is a layer of its own, so Resolve must not apply it again.
+			merged.envMerged = true
+		}
 		// An empty provider id means "keep looking", so a template that spells out
 		// every key never hides the layer that actually named a provider.
 		if !present.Provider && layer.Present.Provider && strings.TrimSpace(layer.Options.Provider) != "" {
