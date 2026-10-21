@@ -1195,6 +1195,13 @@ LIMIT ?`, candidateColumns, ftsBM25Weights, strings.Join(where, " AND "), ftsBM2
 	return out, nil
 }
 
+// SearchVector returns the vector channel's candidates for a query vector.
+//
+// It runs in two phases. The scan reads only chunk ids, dimensions and vectors: the
+// joins stay because filters are predicates on the joined rows, but the 19-column
+// candidate projection is what dominated the query (see docs/performance.md). The
+// retained chunkK chunks are then hydrated in one follow-up query, which keeps the
+// returned Candidate values identical to the lexical channel's.
 func SearchVector(ctx context.Context, database *sql.DB, queryVector []float32, filters SearchFilters) ([]Candidate, error) {
 	if database == nil {
 		return nil, fmt.Errorf("database is nil")
@@ -1213,11 +1220,11 @@ func SearchVector(ctx context.Context, database *sql.DB, queryVector []float32, 
 	}
 
 	q := fmt.Sprintf(`
-SELECT %s, e.dimension, e.vector
+SELECT e.chunk_id, e.dimension, e.vector
 FROM embeddings e
 JOIN chunks c ON c.id = e.chunk_id
 JOIN documents d ON d.id = c.document_id
-WHERE %s`, candidateColumns, strings.Join(where, " AND "))
+WHERE %s`, strings.Join(where, " AND "))
 
 	rows, err := database.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -1227,36 +1234,115 @@ WHERE %s`, candidateColumns, strings.Join(where, " AND "))
 		_ = rows.Close()
 	}()
 
-	out := make([]Candidate, 0, filters.Candidate)
+	type scoredChunk struct {
+		chunkID string
+		score   float64
+	}
+
+	scored := make([]scoredChunk, 0, 1024)
 	for rows.Next() {
+		var chunkID string
 		var dim int
 		var blob []byte
-		c, err := scanCandidate(rows, &dim, &blob)
-		if err != nil {
+		if err := rows.Scan(&chunkID, &dim, &blob); err != nil {
 			return nil, fmt.Errorf("scan vector row: %w", err)
 		}
 		vec := decodeFloat32Vector(blob, dim)
 		if len(vec) == 0 {
 			continue
 		}
-		c.VectorScoreRaw = cosine(queryVector, vec)
-		out = append(out, c)
+		scored = append(scored, scoredChunk{chunkID: chunkID, score: cosine(queryVector, vec)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate vector rows: %w", err)
 	}
 
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].VectorScoreRaw == out[j].VectorScoreRaw {
-			return out[i].ChunkID < out[j].ChunkID
+	// Same total order as before: score descending, then chunk id ascending. Chunk
+	// ids are unique, so the retained set and its order are identical to sorting the
+	// hydrated candidates.
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].chunkID < scored[j].chunkID
 		}
-		return out[i].VectorScoreRaw > out[j].VectorScoreRaw
+		return scored[i].score > scored[j].score
 	})
-	if len(out) > filters.Candidate {
-		out = out[:filters.Candidate]
+	if len(scored) > filters.Candidate {
+		scored = scored[:filters.Candidate]
+	}
+
+	if len(scored) == 0 {
+		return []Candidate{}, nil
+	}
+
+	chunkIDs := make([]string, 0, len(scored))
+	for _, item := range scored {
+		chunkIDs = append(chunkIDs, item.chunkID)
+	}
+
+	hydrated, err := hydrateCandidates(ctx, database, chunkIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Candidate, 0, len(scored))
+	for _, item := range scored {
+		candidate, ok := hydrated[item.chunkID]
+		if !ok {
+			// The chunk disappeared between the scan and the hydration query.
+			continue
+		}
+		candidate.VectorScoreRaw = item.score
+		out = append(out, candidate)
 	}
 
 	return out, nil
+}
+
+// hydrationBatchSize bounds the IN list of a hydration query. The default candidate
+// count is far smaller; this only matters when a caller raises candidateK.
+const hydrationBatchSize = 500
+
+// hydrateCandidates loads the full candidate projection for the given chunk ids, so
+// the scan can stay limited to ids and vectors. Ids that no longer exist are simply
+// absent from the result.
+func hydrateCandidates(ctx context.Context, database *sql.DB, chunkIDs []string) (map[string]Candidate, error) {
+	hydrated := make(map[string]Candidate, len(chunkIDs))
+
+	for start := 0; start < len(chunkIDs); start += hydrationBatchSize {
+		batch := chunkIDs[start:min(start+hydrationBatchSize, len(chunkIDs))]
+
+		q := fmt.Sprintf(`
+SELECT %s
+FROM chunks c
+JOIN documents d ON d.id = c.document_id
+WHERE c.id IN (%s)`, candidateColumns, questionMarks(len(batch)))
+
+		args := make([]any, 0, len(batch))
+		for _, chunkID := range batch {
+			args = append(args, chunkID)
+		}
+
+		rows, err := database.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("hydrate vector candidates: %w", err)
+		}
+
+		for rows.Next() {
+			candidate, err := scanCandidate(rows)
+			if err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan hydrated candidate: %w", err)
+			}
+			hydrated[candidate.ChunkID] = candidate
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate hydrated candidates: %w", err)
+		}
+		_ = rows.Close()
+	}
+
+	return hydrated, nil
 }
 
 func FetchChunkWindow(ctx context.Context, database *sql.DB, documentID string, centerIndex int, expand int) ([]ChunkWindowItem, error) {

@@ -61,6 +61,11 @@ This keeps one implementation path for command behavior while preserving stable 
    and adds optional expansion.
 5. CLI renders text output, JSON contract, and optional explain diagnostics.
 
+The vector channel is two-phase: it scans chunk ids and vectors only, ranks them, and
+then hydrates the retained `candidateK` candidates in a single follow-up query, so the
+scan never projects metadata that only the survivors need. The measured effect and the
+remaining per-row costs are in [Performance: the vector channel](performance.md).
+
 ## Stats Command Flow
 
 1. CLI validates `--db` and output mode.
