@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/glebarez/go-sqlite v1.23.0
 	github.com/spf13/viper v1.21.0
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 )
 
 require (
