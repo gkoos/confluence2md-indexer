@@ -69,8 +69,11 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	}
 
 	if req.Rebuild {
-		if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("index rebuild failed to recreate db file: %w", err)
+		// The WAL and shared-memory sidecars belong to the file being replaced.
+		for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("index rebuild failed to recreate db file: %w", err)
+			}
 		}
 	}
 

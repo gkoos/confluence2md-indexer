@@ -12,6 +12,10 @@ import (
 
 const OutputSchemaVersion = "1"
 
+// ErrBusy is returned (wrapped) when another process holds the index locked past
+// the busy timeout; callers can test for it with errors.Is and retry.
+var ErrBusy = db.ErrBusy
+
 type QueryRequest = query.Request
 type QueryResult = query.Result
 
@@ -46,19 +50,19 @@ func Query(ctx context.Context, dbPath string, req QueryRequest) (*QueryResponse
 
 	database, err := db.Open(dbPath)
 	if err != nil {
-		return nil, err
+		return nil, db.WrapBusy(err)
 	}
 	defer func() { _ = database.Close() }()
 
 	// Refuse a database written by another build instead of failing later with a
 	// SQL error about a missing column.
 	if err := db.Verify(ctx, database); err != nil {
-		return nil, err
+		return nil, db.WrapBusy(err)
 	}
 
 	response, err := query.RunWithFacets(ctx, database, provider, req)
 	if err != nil {
-		return nil, err
+		return nil, db.WrapBusy(err)
 	}
 
 	return &QueryResponse{Results: response.Results, Total: response.Total, Facets: response.Facets}, nil
