@@ -23,8 +23,11 @@ func TestE2EGoldenContracts(t *testing.T) {
 	})
 	assertGoldenJSON(t, "index.golden.json", indexOut, func(payload map[string]any) {
 		payload["dbPath"] = "<db-path>"
-		payload["inputFolder"] = "<input-folder>"
-		payload["metadataPath"] = "<metadata-path>"
+		for _, source := range payload["sources"].([]any) {
+			entry := source.(map[string]any)
+			entry["folder"] = "<input-folder>"
+			entry["metadataPath"] = "<metadata-path>"
+		}
 		payload["runId"] = "<run-id>"
 	})
 

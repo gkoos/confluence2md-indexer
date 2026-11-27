@@ -16,6 +16,7 @@ import (
 	"github.com/gkoos/confluence2md-indexer/internal/config"
 	"github.com/gkoos/confluence2md-indexer/internal/db"
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
+	"github.com/gkoos/confluence2md-indexer/internal/indexer"
 	"github.com/gkoos/confluence2md-indexer/internal/query"
 	"github.com/gkoos/confluence2md-indexer/internal/service"
 )
@@ -26,6 +27,10 @@ const (
 
 	defaultDBFileName = "confluence2md-index.db"
 	outputSchemaV1    = service.OutputSchemaVersion
+
+	// indexOutputSchemaVersion is 2 because the index payload reports a list of sources
+	// where version 1 reported one inputFolder and metadataPath. Query and stats keep 1.
+	indexOutputSchemaVersion = "2"
 )
 
 // DefaultVersion is what a build the release pipeline did not stamp reports.
@@ -95,6 +100,8 @@ func (a *App) runIndex(args []string) int {
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON output")
 	failIfStale := fs.Bool("fail-if-stale", false, "Exit non-zero when the crawl completed after this run started")
 	skipEmbeddings := fs.Bool("skip-embeddings", false, "Store no embeddings and leave the vector channel empty")
+	var sourceSpecs stringListFlag
+	fs.Var(&sourceSpecs, "source", "Source to index as id=folder; repeatable. Replaces the folder argument and the sources in the configuration file")
 	embeddingValues := &embeddingFlags{}
 	registerEmbeddingFlags(fs, embeddingValues)
 
@@ -106,11 +113,6 @@ func (a *App) runIndex(args []string) int {
 	if len(folders) > 1 {
 		fmt.Fprintln(os.Stderr, "index accepts at most one folder argument")
 		return exitCodeInvalidUsage
-	}
-
-	folder := "."
-	if len(folders) == 1 {
-		folder = folders[0]
 	}
 
 	flagOptions, err := embeddingValues.options()
@@ -135,7 +137,13 @@ func (a *App) runIndex(args []string) int {
 	}
 	options.Skip = options.Skip || *skipEmbeddings
 
-	dbPath, err := resolveDBPath(folder, *dbPathFlag, cfg.File.DBPath())
+	sources, err := resolveIndexSources(folders, sourceSpecs, cfg.File.Sources)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "index: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+
+	dbPath, err := resolveIndexDBPath(sources, *dbPathFlag, cfg.File.DBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
 		return exitCodeInvalidUsage
@@ -143,7 +151,7 @@ func (a *App) runIndex(args []string) int {
 
 	ctx := context.Background()
 	indexResp, err := service.Index(ctx, service.IndexRequest{
-		Folder:    folder,
+		Sources:   sources,
 		DBPath:    dbPath,
 		Rebuild:   *rebuild,
 		Embedding: options,
@@ -155,7 +163,7 @@ func (a *App) runIndex(args []string) int {
 
 	if *jsonOutput {
 		payload := map[string]any{
-			"schemaVersion": outputSchemaV1,
+			"schemaVersion": indexOutputSchemaVersion,
 			"command":       "index",
 			"status":        indexResp.Status,
 			"incremental":   indexResp.Incremental,
@@ -169,8 +177,7 @@ func (a *App) runIndex(args []string) int {
 				"dimension":  indexResp.EmbeddingDimension,
 				"capability": indexResp.EmbeddingCapability,
 			},
-			"inputFolder":  indexResp.InputFolder,
-			"metadataPath": indexResp.MetadataPath,
+			"sources":      sourceResultsJSON(indexResp.Sources),
 			"pageCount":    indexResp.PageCount,
 			"checkedFiles": indexResp.CheckedFiles,
 			"documents": map[string]any{
@@ -188,6 +195,11 @@ func (a *App) runIndex(args []string) int {
 		fmt.Println(string(b))
 	} else {
 		fmt.Printf("index preflight passed: %d pages, %d markdown files validated\n", indexResp.PageCount, indexResp.CheckedFiles)
+		if len(indexResp.Sources) > 1 {
+			for _, source := range indexResp.Sources {
+				fmt.Printf("  source %s (%s): %d pages\n", source.ID, source.Type, source.PageCount)
+			}
+		}
 		fmt.Printf("db path: %s\n", indexResp.DBPath)
 		fmt.Printf("run id: %s\n", indexResp.RunID)
 		fmt.Printf("runs recorded: %d\n", indexResp.DBStats.Runs)
@@ -212,7 +224,7 @@ func (a *App) runIndex(args []string) int {
 		}
 	}
 
-	return staleExit("index", indexResp.Corpus, *failIfStale, reindexHint(indexResp.InputFolder, dbPath, *configPath))
+	return staleExit("index", indexResp.Corpus, *failIfStale, reindexHint(sources, dbPath, *configPath))
 }
 
 // embeddingFlags collects the shared embedding flag surface. Every flag maps to
@@ -798,7 +810,7 @@ func (a *App) runStats(args []string) int {
 		// The response is the payload, so the API and the command cannot drift apart.
 		b, _ := json.MarshalIndent(statsResp, "", "  ")
 		fmt.Println(string(b))
-		return staleExit("stats", stats.Corpus, *failIfStale, reindexHint("", dbPath, *configPath))
+		return staleExit("stats", stats.Corpus, *failIfStale, reindexHint(sourcesFromConfig(cfg.File.Sources), dbPath, *configPath))
 	}
 
 	fmt.Printf("db path: %s\n", statsResp.DBPath)
@@ -846,7 +858,7 @@ func (a *App) runStats(args []string) int {
 		fmt.Printf("corpus: %s\n", strings.Join(parts, " "))
 	}
 
-	return staleExit("stats", stats.Corpus, *failIfStale, reindexHint("", dbPath, *configPath))
+	return staleExit("stats", stats.Corpus, *failIfStale, reindexHint(sourcesFromConfig(cfg.File.Sources), dbPath, *configPath))
 }
 
 // staleExit reports a stale index and returns the exit code the command should use. A
@@ -867,17 +879,22 @@ func staleExit(command string, snapshot *db.CorpusSnapshot, enabled bool, reinde
 
 // reindexHint renders the command that refreshes the database this process checked. The
 // database is always named: the default database lives inside the indexed folder, so a bare
-// "index <folder>" can update a different file. The folder stays a placeholder when the
+// "index <folder>" can update a different file. The sources stay a placeholder when the
 // command only knew the database, and a --config the user passed is repeated because the
 // embedding settings have to match the stored identity.
-func reindexHint(folder, dbPath, configPath string) string {
+func reindexHint(sources []indexer.Source, dbPath, configPath string) string {
 	parts := make([]string, 0, 7)
 	parts = append(parts, "confluence2md-indexer", "index")
 
-	if folder = strings.TrimSpace(folder); folder != "" {
-		parts = append(parts, shellQuote(folder))
-	} else {
+	switch {
+	case len(sources) == 0:
 		parts = append(parts, "<folder>")
+	case len(sources) == 1 && sources[0].ID == indexer.DefaultSourceID:
+		parts = append(parts, shellQuote(sources[0].Folder))
+	default:
+		for _, source := range sources {
+			parts = append(parts, "--source", shellQuote(source.ID+"="+source.Folder))
+		}
 	}
 	parts = append(parts, "--db", shellQuote(dbPath))
 
@@ -886,6 +903,86 @@ func reindexHint(folder, dbPath, configPath string) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// resolveIndexSources picks what to index: --source flags, then a folder argument, then
+// the sources in the configuration file, then the working directory. The first two
+// cannot be combined, because they would silently drop one or the other.
+func resolveIndexSources(folders, specs []string, configured []config.Source) ([]indexer.Source, error) {
+	if len(specs) > 0 {
+		if len(folders) > 0 {
+			return nil, errors.New("give either a folder argument or --source flags, not both")
+		}
+
+		sources := make([]indexer.Source, 0, len(specs))
+		for _, spec := range specs {
+			source, err := indexer.ParseSourceSpec(spec)
+			if err != nil {
+				return nil, fmt.Errorf("--source: %w", err)
+			}
+			sources = append(sources, source)
+		}
+		return normalizeSources(sources)
+	}
+
+	if len(folders) == 1 {
+		return normalizeSources(indexer.SingleSource(folders[0]))
+	}
+
+	if len(configured) > 0 {
+		sources := make([]indexer.Source, 0, len(configured))
+		for _, source := range configured {
+			sources = append(sources, indexer.Source{ID: source.ID, Type: source.Type, Folder: source.Path})
+		}
+		return normalizeSources(sources)
+	}
+
+	return normalizeSources(indexer.SingleSource("."))
+}
+
+// sourcesFromConfig turns the configured sources into the list a re-index command
+// repeats. A hint that left them out would let the folder the user fills in replace
+// the configured list with a single default source, which removes the others' documents.
+func sourcesFromConfig(configured []config.Source) []indexer.Source {
+	sources := make([]indexer.Source, 0, len(configured))
+	for _, source := range configured {
+		sources = append(sources, indexer.Source{ID: source.ID, Type: source.Type, Folder: source.Path})
+	}
+	return sources
+}
+
+func normalizeSources(sources []indexer.Source) ([]indexer.Source, error) {
+	normalized, err := indexer.NormalizeSources(sources)
+	if err != nil {
+		return nil, fmt.Errorf("sources: %w", err)
+	}
+	return normalized, nil
+}
+
+// resolveIndexDBPath keeps the default database inside the indexed folder only when
+// there is one folder to put it in; several sources need an explicit location.
+func resolveIndexDBPath(sources []indexer.Source, dbPathFlag string, configuredPath string) (string, error) {
+	if len(sources) > 1 && strings.TrimSpace(dbPathFlag) == "" && strings.TrimSpace(configuredPath) == "" {
+		return "", errors.New("indexing several sources needs --db or db.path, because there is no single folder to hold the database")
+	}
+
+	return resolveDBPath(sources[0].Folder, dbPathFlag, configuredPath)
+}
+
+// sourceResultsJSON is the stable JSON shape of what each source contributed.
+func sourceResultsJSON(results []service.SourceResult) []map[string]any {
+	out := make([]map[string]any, 0, len(results))
+	for _, result := range results {
+		out = append(out, map[string]any{
+			"id":           result.ID,
+			"type":         result.Type,
+			"folder":       result.Folder,
+			"metadataPath": result.MetadataPath,
+			"pageCount":    result.PageCount,
+			"checkedFiles": result.CheckedFiles,
+		})
+	}
+	return out
 }
 
 // shellQuote wraps a value that a shell would split or expand. Single quotes are literal in
@@ -911,7 +1008,7 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "confluence2md-indexer - index and query confluence2md output")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Usage:")
-	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings] [--source id=folder ...]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--config file] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--config file] [--json]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer --version")

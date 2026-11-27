@@ -10,6 +10,7 @@ import (
 
 	"github.com/gkoos/confluence2md-indexer/internal/embedding"
 	"github.com/gkoos/confluence2md-indexer/internal/embedding/embeddingtest"
+	"github.com/gkoos/confluence2md-indexer/internal/indexer"
 	"github.com/gkoos/confluence2md-indexer/internal/query"
 )
 
@@ -35,7 +36,7 @@ func TestIndexAndStatsHappyPath(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(dir, "confluence2md-index.db")
-	idxResp, err := Index(context.Background(), IndexRequest{Folder: dir, DBPath: dbPath, Rebuild: false})
+	idxResp, err := Index(context.Background(), IndexRequest{Sources: indexer.SingleSource(dir), DBPath: dbPath, Rebuild: false})
 	if err != nil {
 		t.Fatalf("index failed: %v", err)
 	}
@@ -77,11 +78,11 @@ func TestIndexRebuildRecreatesDB(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(dir, "confluence2md-index.db")
-	if _, err := Index(context.Background(), IndexRequest{Folder: dir, DBPath: dbPath, Rebuild: false}); err != nil {
+	if _, err := Index(context.Background(), IndexRequest{Sources: indexer.SingleSource(dir), DBPath: dbPath, Rebuild: false}); err != nil {
 		t.Fatalf("initial index failed: %v", err)
 	}
 
-	rebuildResp, err := Index(context.Background(), IndexRequest{Folder: dir, DBPath: dbPath, Rebuild: true})
+	rebuildResp, err := Index(context.Background(), IndexRequest{Sources: indexer.SingleSource(dir), DBPath: dbPath, Rebuild: true})
 	if err != nil {
 		t.Fatalf("rebuild index failed: %v", err)
 	}
@@ -94,12 +95,12 @@ func TestIndexRebuildRecreatesDB(t *testing.T) {
 }
 
 func TestIndexValidatesInputs(t *testing.T) {
-	_, err := Index(context.Background(), IndexRequest{Folder: "", DBPath: "db.sqlite"})
+	_, err := Index(context.Background(), IndexRequest{Sources: nil, DBPath: "db.sqlite"})
 	if err == nil {
 		t.Fatalf("expected error for empty folder")
 	}
 
-	_, err = Index(context.Background(), IndexRequest{Folder: ".", DBPath: ""})
+	_, err = Index(context.Background(), IndexRequest{Sources: indexer.SingleSource("."), DBPath: ""})
 	if err == nil {
 		t.Fatalf("expected error for empty db path")
 	}
@@ -139,7 +140,7 @@ func TestIndexRecordsEmbeddingIdentity(t *testing.T) {
 	dbPath := filepath.Join(dir, "confluence2md-index.db")
 	ctx := context.Background()
 
-	first, err := Index(ctx, IndexRequest{Folder: dir, DBPath: dbPath})
+	first, err := Index(ctx, IndexRequest{Sources: indexer.SingleSource(dir), DBPath: dbPath})
 	if err != nil {
 		t.Fatalf("index failed: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestIndexRecordsEmbeddingIdentity(t *testing.T) {
 	// Re-index with a different provider: content is unchanged, so this only
 	// re-embeds because the identity changed.
 	other := embeddingtest.New(16)
-	second, err := Index(ctx, IndexRequest{Folder: dir, DBPath: dbPath, Provider: other})
+	second, err := Index(ctx, IndexRequest{Sources: indexer.SingleSource(dir), DBPath: dbPath, Provider: other})
 	if err != nil {
 		t.Fatalf("second index failed: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestIndexEmbedsTheContextHeaderAndKeepsStoredTextRaw(t *testing.T) {
 	provider := &recordingProvider{Provider: embeddingtest.New(8)}
 
 	_, err := Index(context.Background(), IndexRequest{
-		Folder:   dir,
+		Sources:  indexer.SingleSource(dir),
 		DBPath:   dbPath,
 		Provider: provider,
 		Embedding: embedding.Options{Context: []string{
@@ -297,8 +298,8 @@ func TestIndexRecordsTheContextInTheIdentity(t *testing.T) {
 	ctx := context.Background()
 
 	withContext, err := Index(ctx, IndexRequest{
-		Folder: dir,
-		DBPath: dbPath,
+		Sources: indexer.SingleSource(dir),
+		DBPath:  dbPath,
 		Embedding: embedding.Options{
 			Provider: embedding.ProviderBowLocal,
 			// Named out of order on purpose: the identity has to be canonical.
@@ -315,7 +316,7 @@ func TestIndexRecordsTheContextInTheIdentity(t *testing.T) {
 	// Dropping the selection changes the identity, so the next run re-embeds instead of
 	// keeping vectors from the decorated space, without needing --rebuild.
 	plain, err := Index(ctx, IndexRequest{
-		Folder:    dir,
+		Sources:   indexer.SingleSource(dir),
 		DBPath:    dbPath,
 		Embedding: embedding.Options{Provider: embedding.ProviderBowLocal},
 	})
@@ -365,7 +366,7 @@ func TestIndexReembedsWhenTheHeaderMetadataChanges(t *testing.T) {
 	dbPath := filepath.Join(dir, "confluence2md-index.db")
 	provider := &recordingProvider{Provider: embeddingtest.New(8)}
 	request := IndexRequest{
-		Folder:    dir,
+		Sources:   indexer.SingleSource(dir),
 		DBPath:    dbPath,
 		Provider:  provider,
 		Embedding: embedding.Options{Context: []string{embedding.ContextTitle}},
@@ -439,7 +440,7 @@ func TestIndexIndexesTheSectionBreadcrumb(t *testing.T) {
 
 	dbPath := filepath.Join(dir, "confluence2md-index.db")
 	if _, err := Index(context.Background(), IndexRequest{
-		Folder:    dir,
+		Sources:   indexer.SingleSource(dir),
 		DBPath:    dbPath,
 		Embedding: embedding.Options{Skip: true},
 	}); err != nil {

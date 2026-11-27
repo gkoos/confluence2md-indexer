@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gkoos/confluence2md-indexer/internal/db"
+	"github.com/gkoos/confluence2md-indexer/internal/indexer"
 )
 
 func writeLockFixture(t *testing.T) (folder, dbPath string) {
@@ -37,7 +38,7 @@ func TestRebuildRefusesToDeleteAnIndexInUse(t *testing.T) {
 	folder, dbPath := writeLockFixture(t)
 	ctx := context.Background()
 
-	if _, err := Index(ctx, IndexRequest{Folder: folder, DBPath: dbPath}); err != nil {
+	if _, err := Index(ctx, IndexRequest{Sources: indexer.SingleSource(folder), DBPath: dbPath}); err != nil {
 		t.Fatalf("initial index: %v", err)
 	}
 
@@ -46,7 +47,7 @@ func TestRebuildRefusesToDeleteAnIndexInUse(t *testing.T) {
 		t.Fatalf("reader lock: %v", err)
 	}
 
-	_, err = Index(ctx, IndexRequest{Folder: folder, DBPath: dbPath, Rebuild: true})
+	_, err = Index(ctx, IndexRequest{Sources: indexer.SingleSource(folder), DBPath: dbPath, Rebuild: true})
 	if !errors.Is(err, db.ErrBusy) {
 		t.Fatalf("rebuild while the index is in use: err = %v, want ErrBusy", err)
 	}
@@ -57,7 +58,7 @@ func TestRebuildRefusesToDeleteAnIndexInUse(t *testing.T) {
 	if err := reader.Release(); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if _, err := Index(ctx, IndexRequest{Folder: folder, DBPath: dbPath, Rebuild: true}); err != nil {
+	if _, err := Index(ctx, IndexRequest{Sources: indexer.SingleSource(folder), DBPath: dbPath, Rebuild: true}); err != nil {
 		t.Fatalf("rebuild after the reader left: %v", err)
 	}
 }
@@ -67,7 +68,7 @@ func TestQueriesWaitOutARebuild(t *testing.T) {
 	folder, dbPath := writeLockFixture(t)
 	ctx := context.Background()
 
-	if _, err := Index(ctx, IndexRequest{Folder: folder, DBPath: dbPath}); err != nil {
+	if _, err := Index(ctx, IndexRequest{Sources: indexer.SingleSource(folder), DBPath: dbPath}); err != nil {
 		t.Fatalf("initial index: %v", err)
 	}
 

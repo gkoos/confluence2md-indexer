@@ -18,8 +18,18 @@
 
 db:
   # Index location. Empty keeps the default, a database file inside the indexed
-  # folder.
+  # folder. With several sources there is no single folder, so set this or pass --db.
   path: ""
+
+# Folders of crawler output to build one index from, each under its own id. Document
+# ids are prefixed with the source id, so two sources can hold pages with the same
+# key. A folder argument or --source flags replace this list for one run.
+# sources:
+#   - id: engineering
+#     type: confluence
+#     path: ./exports/engineering
+#   - id: support
+#     path: ./exports/support
 
 embedding:
   # Provider id. bow-local (default) needs no network; use "list" with

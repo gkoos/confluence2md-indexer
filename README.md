@@ -86,7 +86,7 @@ confluence2md-indexer stats --db ./output/confluence2md-index.db --json
 
 ```text
 confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings]
-  [--fail-if-stale]
+  [--fail-if-stale] [--source id=folder ...]
 confluence2md-indexer query --q text
   [--db path] [--config file]
   [--mode hybrid|lexical|vector]
@@ -303,6 +303,22 @@ The indexer reads:
 
 - `metadata.json` produced by `confluence2md`
 - markdown files referenced by `metadata.pages[*].local_path`
+
+### Several sources in one index
+
+An index can be built from several folders of crawler output. Give each a source id:
+
+```sh
+confluence2md-indexer index --source engineering=./exports/eng --source support=./exports/support --db ./team.db
+```
+
+or list them under `sources:` in the configuration file (see `config.example.yaml`). A folder argument or `--source` flags replace the configured list for that run, and the two cannot be combined.
+
+- Document ids are prefixed with the source id (`engineering/<host>/<page id>`), so two sources can hold pages with the same key without colliding. The page's own key stays in `pageId`.
+- Several sources have no single folder to hold the database, so `--db` or `db.path` is required. With one source the default database stays inside its folder.
+- A source dropped from the list has its documents removed on the next run, and other sources are untouched.
+- The stored crawl summary combines the sources conservatively: the latest crawl completion, so `--fail-if-stale` trips if any source's crawl finished after the run started, and a last-success time only when every source reported one.
+- An index written by an earlier version is refused with a message to rebuild it; there is no migration.
 
 ### Indexing Flow
 

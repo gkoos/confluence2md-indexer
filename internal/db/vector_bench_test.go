@@ -80,7 +80,7 @@ func seedVectorBenchmark(b *testing.B, chunks, dim int) (*sql.DB, []float32) {
 
 	// The same statements UpsertDocumentWithChunks and UpsertEmbeddings run, minus the
 	// full-text table.
-	insertDocument := `INSERT INTO documents(id, ` + documentColumns + `, content_hash, metadata_hash, updated_at) VALUES(` + questionMarks(24) + `)`
+	insertDocument := `INSERT INTO documents(id, ` + documentColumns + `, content_hash, metadata_hash, updated_at) VALUES(` + questionMarks(len(DocumentRecord{}.documentValues())+4) + `)`
 	const insertChunk = `INSERT INTO chunks(id, document_id, chunk_index, text, chunk_hash, updated_at) VALUES(?, ?, ?, ?, ?, ?)`
 	const insertEmbedding = `INSERT INTO embeddings(chunk_id, name, dimension, vector, updated_at) VALUES(?, ?, ?, ?, ?)`
 

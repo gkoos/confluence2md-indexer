@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   page_id TEXT NOT NULL,
+  source_id TEXT NOT NULL DEFAULT '',
+  source_type TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL,
   local_path TEXT NOT NULL,
   space_key TEXT NOT NULL DEFAULT '',
@@ -102,6 +104,7 @@ CREATE TABLE IF NOT EXISTS corpus_snapshot (
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_space_key ON documents(space_key);
+CREATE INDEX IF NOT EXISTS idx_documents_source_id ON documents(source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_page_id ON documents(page_id);
 CREATE INDEX IF NOT EXISTS idx_documents_last_modified_at ON documents(last_modified_at);
 CREATE INDEX IF NOT EXISTS idx_documents_host ON documents(host);
@@ -122,13 +125,13 @@ d.modified_by_name, d.link_in, d.attachment_count, d.comment_count`
 // statements from drifting apart.
 const documentColumns = `page_id, title, local_path, space_key, source_url, canonical_url, host,
 last_modified_at, created_at, crawled_at, version, depth, parent_id, created_by_name, modified_by_name,
-is_seed, link_in, link_out, attachment_count, comment_count`
+is_seed, link_in, link_out, attachment_count, comment_count, source_id, source_type`
 
 // schemaVersion identifies the schema this build writes. A database stamped with
 // another version is refused rather than upgraded in place: rebuilding from the
 // crawler output is deterministic, costs no embedding calls for unchanged text, and
 // is the only path that populates every column.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // rebuildHint is the command that fixes every schema mismatch.
 const rebuildHint = "confluence2md-indexer index <folder> --rebuild"
@@ -218,8 +221,12 @@ func (m *Manifest) SingleName() string {
 }
 
 type DocumentRecord struct {
-	ID             string
-	PageID         string
+	ID     string
+	PageID string
+	// SourceID and SourceType name the source the document came from; the id of the
+	// document is already namespaced with SourceID.
+	SourceID       string
+	SourceType     string
 	Title          string
 	LocalPath      string
 	SpaceKey       string
@@ -251,7 +258,7 @@ func (doc DocumentRecord) documentValues() []any {
 		doc.PageID, doc.Title, doc.LocalPath, doc.SpaceKey, doc.SourceURL, doc.CanonicalURL, doc.Host,
 		doc.LastModifiedAt, doc.CreatedAt, doc.CrawledAt, doc.Version, doc.Depth, doc.ParentID,
 		doc.CreatedByName, doc.ModifiedByName, doc.IsSeed, doc.LinkIn, doc.LinkOut, doc.Attachments,
-		doc.Comments,
+		doc.Comments, doc.SourceID, doc.SourceType,
 	}
 }
 
@@ -961,8 +968,10 @@ func UpsertDocumentWithChunks(ctx context.Context, database *sql.DB, doc Documen
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if isNew {
-		insert := `INSERT INTO documents(id, ` + documentColumns + `, content_hash, metadata_hash, updated_at) VALUES(` + questionMarks(24) + `)`
-		args := append([]any{doc.ID}, doc.documentValues()...)
+		values := doc.documentValues()
+		// id, the bound document values, then content_hash, metadata_hash and updated_at.
+		insert := `INSERT INTO documents(id, ` + documentColumns + `, content_hash, metadata_hash, updated_at) VALUES(` + questionMarks(len(values)+4) + `)`
+		args := append([]any{doc.ID}, values...)
 		args = append(args, doc.ContentHash, doc.MetadataHash, now)
 		if _, err := tx.ExecContext(ctx, insert, args...); err != nil {
 			return "", 0, fmt.Errorf("insert document: %w", err)
