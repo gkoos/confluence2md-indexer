@@ -95,7 +95,33 @@ func (f File) validateQuery() error {
 		return fmt.Errorf("query.expand must not be negative, got %d", *q.Expand)
 	}
 
+	if _, err := q.SourceWeightMap(); err != nil {
+		return fmt.Errorf("query.source_weights: %w", err)
+	}
+
 	return nil
+}
+
+// SourceWeightMap returns the configured weights by source id. A source listed twice is
+// an error, because the later entry would silently replace the earlier one.
+func (q *Query) SourceWeightMap() (map[string]float64, error) {
+	if q == nil || len(q.SourceWeights) == 0 {
+		return nil, nil
+	}
+
+	weights := make(map[string]float64, len(q.SourceWeights))
+	for _, entry := range q.SourceWeights {
+		id := strings.TrimSpace(entry.ID)
+		if _, seen := weights[id]; seen {
+			return nil, fmt.Errorf("source %q is listed more than once", id)
+		}
+		weights[id] = entry.Weight
+	}
+	if err := query.ValidateSourceWeights(weights); err != nil {
+		return nil, err
+	}
+
+	return weights, nil
 }
 
 // validateChoice checks a value against the alternatives a setting accepts. The value

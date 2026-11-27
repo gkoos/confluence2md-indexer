@@ -244,6 +244,7 @@ Result object fields:
 - `vectorScore`
 - `fusedScore`
 - `fusion`
+- optional `sourceWeight` when `--source-weight` or `query.source_weights` applied a weight other than 1 to this result's source. The weights used are echoed in `request.SourceWeights`
 
 ## Explain Output (`query --explain`)
 

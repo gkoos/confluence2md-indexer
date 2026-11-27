@@ -60,6 +60,17 @@ type Query struct {
 	TopK       *int     `mapstructure:"top_k"`
 	CandidateK *int     `mapstructure:"candidate_k"`
 	Expand     *int     `mapstructure:"expand"`
+
+	// SourceWeights scales the score of results from the listed sources. It is a list
+	// rather than a map because the config reader lowercases map keys, and source ids
+	// are case-sensitive.
+	SourceWeights []SourceWeight `mapstructure:"source_weights"`
+}
+
+// SourceWeight is the score multiplier for one source id.
+type SourceWeight struct {
+	ID     string  `mapstructure:"id"`
+	Weight float64 `mapstructure:"weight"`
 }
 
 // Source is one folder of crawler output to index.

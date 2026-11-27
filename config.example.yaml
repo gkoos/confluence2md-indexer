@@ -109,3 +109,13 @@ query:
 
   # Age at which the recency prior falls to half (0s = built-in default 180d).
   recency_half_life: 0s
+
+  # Score multipliers per source id, for an index built from several sources. A weight
+  # of 2 counts that source's relevance twice over; 0.5 counts it half. Weights must be
+  # positive, and an id the index does not hold is ignored. --source-weight id=weight
+  # replaces one of them for a single query. Off by default.
+  # source_weights:
+  #   - id: engineering
+  #     weight: 1.5
+  #   - id: archive
+  #     weight: 0.5

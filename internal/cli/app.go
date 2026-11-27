@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -443,6 +444,8 @@ func (a *App) runQuery(args []string) int {
 	fs.Var(spaceList, "space", "Filter by space_key; repeatable")
 	sourceList := &stringListFlag{}
 	fs.Var(sourceList, "source", "Filter by source id; repeatable")
+	var sourceWeightSpecs stringListFlag
+	fs.Var(&sourceWeightSpecs, "source-weight", "Scale the score of one source as id=weight, for example docs=1.5; repeatable, replaces a configured weight")
 	author := fs.String("author", "", "Filter by creator or last modifier name")
 	createdBy := fs.String("created-by", "", "Filter by creator name")
 	modifiedBy := fs.String("modified-by", "", "Filter by last modifier name")
@@ -646,21 +649,28 @@ func (a *App) runQuery(args []string) int {
 	}
 
 	ctx := context.Background()
+	sourceWeights, err := resolveSourceWeights(cfg.File.Query, sourceWeightSpecs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+
 	req := query.Request{
-		Text:       *queryText,
-		Mode:       *mode,
-		Fusion:     *fusion,
-		Alpha:      *alpha,
-		RRFK:       *rrfK,
-		TopK:       *topK,
-		Offset:     *offset,
-		Limit:      *limit,
-		CandidateK: *candidateK,
-		Expand:     *expand,
-		MaxPerPage: *maxPerPage,
-		Group:      *group,
-		Facets:     facetList,
-		Embedding:  embeddingOptions,
+		Text:          *queryText,
+		Mode:          *mode,
+		Fusion:        *fusion,
+		Alpha:         *alpha,
+		RRFK:          *rrfK,
+		TopK:          *topK,
+		Offset:        *offset,
+		Limit:         *limit,
+		CandidateK:    *candidateK,
+		Expand:        *expand,
+		MaxPerPage:    *maxPerPage,
+		Group:         *group,
+		Facets:        facetList,
+		Embedding:     embeddingOptions,
+		SourceWeights: sourceWeights,
 		Filters: db.SearchFilters{
 			SpaceKey:       firstSpace(*spaceList),
 			Spaces:         []string(*spaceList),
@@ -1050,6 +1060,7 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "  --priors <list>              recency, authority, seed, depth, richness")
 	_, _ = fmt.Fprintln(out, "  --prior-strength <0..1>      largest relative score adjustment (default 0.15)")
 	_, _ = fmt.Fprintln(out, "  --recency-half-life <age>    age at which recency halves (default 180d)")
+	_, _ = fmt.Fprintln(out, "  --source-weight id=weight    score multiplier for one source, repeatable (off by default)")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "A query section in the configuration file can supply defaults for mode, fusion,")
 	_, _ = fmt.Fprintln(out, "alpha, top_k, candidate_k, expand and the priors; a flag you pass still wins.")
@@ -1140,6 +1151,39 @@ func summarizeText(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
+// resolveSourceWeights combines the weights the configuration file lists with the
+// --source-weight flags. A flag for a source replaces its configured weight, and the rest
+// stay, so one invocation can adjust a configured setup without restating it.
+func resolveSourceWeights(fileQuery *config.Query, specs []string) (map[string]float64, error) {
+	weights, err := fileQuery.SourceWeightMap()
+	if err != nil {
+		return nil, fmt.Errorf("query.source_weights: %w", err)
+	}
+
+	for _, spec := range specs {
+		id, value, found := strings.Cut(spec, "=")
+		if !found {
+			return nil, fmt.Errorf("--source-weight %q must be written id=weight", spec)
+		}
+
+		weight, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil {
+			return nil, fmt.Errorf("--source-weight %q: the weight is not a number", spec)
+		}
+
+		if weights == nil {
+			weights = map[string]float64{}
+		}
+		weights[strings.TrimSpace(id)] = weight
+	}
+
+	if err := query.ValidateSourceWeights(weights); err != nil {
+		return nil, fmt.Errorf("--source-weight: %w", err)
+	}
+
+	return weights, nil
+}
+
 func buildExplainSummary(results []query.Result, req query.Request) []string {
 	effectiveFusion := req.Fusion
 	switch req.Mode {
@@ -1159,6 +1203,20 @@ func buildExplainSummary(results []query.Result, req query.Request) []string {
 	}
 	if len(results) == 0 {
 		return lines
+	}
+
+	if len(req.SourceWeights) > 0 {
+		ids := make([]string, 0, len(req.SourceWeights))
+		for id := range req.SourceWeights {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+
+		parts := make([]string, 0, len(ids))
+		for _, id := range ids {
+			parts = append(parts, fmt.Sprintf("%s=%g", id, req.SourceWeights[id]))
+		}
+		lines = append(lines, "source-weights="+strings.Join(parts, ","))
 	}
 
 	best := results[0]

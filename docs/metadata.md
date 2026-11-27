@@ -159,6 +159,25 @@ Both channels are min-max normalised and then combined (weighted `--alpha`, or
 with no similarity at all are dropped, while the weakest *real* match is kept, because
 normalisation maps it to exactly zero.
 
+### Source weights
+
+In an index built from several sources, `--source-weight id=weight` (repeatable) or
+`query.source_weights` in the configuration file makes one source count for more or less:
+a weight of 2 counts that source's relevance twice over, 0.5 counts it half. Weights must
+be positive and finite; to leave a source out, use `--source`. A weight of 1, or an id the
+index does not hold, changes nothing.
+
+The weight scales the raw channel score before normalisation, so it can move a result
+past one from another source. A multiplier on the final score could not: normalisation
+maps the weakest real match to exactly zero, and zero times any weight is zero. With
+`--fusion rrf` there are no raw scores, so the weight multiplies the fused rank score
+instead. Either way a weight only reorders: results stay in the set, `request.sourceWeights`
+echoes the weights used, and each affected result reports its `sourceWeight`. A weight for
+a source applies to its chunks on both channels, so it also shifts the normalised scores of
+the other sources a little, because the lowest and highest raw scores move.
+
+A flag for a source replaces that source's configured weight; the others stay.
+
 ### Result shaping
 
 Text relevance and fusion decide *which* rows rank where; these options change the shape
