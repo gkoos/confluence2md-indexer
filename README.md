@@ -86,7 +86,7 @@ confluence2md-indexer stats --db ./output/confluence2md-index.db --json
 
 ```text
 confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings]
-  [--fail-if-stale] [--source id=folder ...]
+  [--fail-if-stale] [--source id=folder ...] [--progress]
 confluence2md-indexer query --q text
   [--db path] [--config file]
   [--mode hybrid|lexical|vector]

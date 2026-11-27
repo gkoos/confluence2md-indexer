@@ -99,6 +99,7 @@ func (a *App) runIndex(args []string) int {
 	rebuild := fs.Bool("rebuild", false, "Recreate the database file before indexing")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON output")
 	failIfStale := fs.Bool("fail-if-stale", false, "Exit non-zero when the crawl completed after this run started")
+	progress := fs.Bool("progress", false, "Write one JSON progress event per line to stderr while indexing")
 	skipEmbeddings := fs.Bool("skip-embeddings", false, "Store no embeddings and leave the vector channel empty")
 	var sourceSpecs stringListFlag
 	fs.Var(&sourceSpecs, "source", "Source to index as id=folder; repeatable. Replaces the folder argument and the sources in the configuration file")
@@ -152,6 +153,7 @@ func (a *App) runIndex(args []string) int {
 	ctx := context.Background()
 	indexResp, err := service.Index(ctx, service.IndexRequest{
 		Sources:   sources,
+		Progress:  progressWriter(*progress),
 		DBPath:    dbPath,
 		Rebuild:   *rebuild,
 		Embedding: options,
@@ -969,6 +971,20 @@ func resolveIndexDBPath(sources []indexer.Source, dbPathFlag string, configuredP
 	return resolveDBPath(sources[0].Folder, dbPathFlag, configuredPath)
 }
 
+// progressWriter returns the callback that prints progress events, or nil when progress
+// was not asked for. Events go to stderr as one JSON object per line, so stdout keeps
+// carrying only the final result; the version line on stderr is the one non-JSON line.
+func progressWriter(enabled bool) func(service.ProgressEvent) {
+	if !enabled {
+		return nil
+	}
+
+	encoder := json.NewEncoder(os.Stderr)
+	return func(event service.ProgressEvent) {
+		_ = encoder.Encode(event)
+	}
+}
+
 // sourceResultsJSON is the stable JSON shape of what each source contributed.
 func sourceResultsJSON(results []service.SourceResult) []map[string]any {
 	out := make([]map[string]any, 0, len(results))
@@ -1008,7 +1024,7 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out, "confluence2md-indexer - index and query confluence2md output")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Usage:")
-	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings] [--source id=folder ...]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings] [--source id=folder ...] [--progress]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--config file] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--config file] [--json]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer --version")

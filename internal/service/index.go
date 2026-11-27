@@ -18,6 +18,9 @@ type IndexRequest struct {
 	Sources []indexer.Source
 	DBPath  string
 	Rebuild bool
+	// Progress, when set, is called synchronously as the run advances. It must not
+	// block for long, because indexing waits for it.
+	Progress func(ProgressEvent)
 	// Provider overrides provider resolution. Tests inject a deterministic
 	// provider here; command paths leave it nil and resolve from Embedding.
 	Provider embedding.Provider
@@ -164,8 +167,15 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	}
 
 	var inserted, updated, metadataUpdates, skipped, chunkWrites, embeddingWrites int
+
+	emit := func(event ProgressEvent) {
+		if req.Progress != nil {
+			req.Progress(event)
+		}
+	}
+	emit(ProgressEvent{Event: "start", Total: len(documents)})
 	keepIDs := make([]string, 0, len(documents))
-	for _, doc := range documents {
+	for i, doc := range documents {
 		keepIDs = append(keepIDs, doc.ID)
 		docRecord := db.DocumentRecord{
 			ID:             doc.ID,
@@ -252,6 +262,8 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 			}
 			embeddingWrites += writtenEmbeddings
 		}
+
+		emit(ProgressEvent{Event: "document", SourceID: doc.SourceID, DocumentID: doc.ID, Status: status, Done: i + 1, Total: len(documents)})
 	}
 
 	deleted, err := db.DeleteDocumentsNotIn(ctx, database, keepIDs)
@@ -299,6 +311,16 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("index db stats failed: %w", err)
 	}
+
+	emit(ProgressEvent{Event: "finished", Done: len(documents), Total: len(documents), Summary: &ProgressSummary{
+		Inserted:        inserted,
+		Updated:         updated,
+		MetadataUpdates: metadataUpdates,
+		Skipped:         skipped,
+		Deleted:         int(deleted),
+		ChunkWrites:     chunkWrites,
+		EmbeddingWrites: embeddingWrites,
+	}})
 
 	return &IndexResponse{
 		Status:              "phase4-ready",

@@ -88,6 +88,18 @@ Nested fields:
 - `dbStats.vectorReady|vectorName|vectorCapability`: whether the index holds a usable vector channel, and which identity and capability it recorded.
 - `dbStats.embeddingModels`: per-identity counters (`name`, `dimension`, `chunks`).
 
+## Progress Events (`index --progress`)
+
+`--progress` writes one JSON object per line to **stderr** while the run advances, so stdout still carries only the final result. The version line printed first on stderr is the only line that is not JSON.
+
+| `event` | When | Fields |
+| --- | --- | --- |
+| `start` | The sources are read and the run is about to write | `total`: documents across all sources |
+| `document` | After each document is stored | `sourceId`, `documentId`, `status` (`inserted`, `updated`, `metadata`, `skipped`), `done`, `total` |
+| `finished` | The run is complete | `done`, `total`, `summary` (`inserted`, `updated`, `metadata`, `skipped`, `deleted`, `chunkWrites`, `embeddingWrites`) |
+
+A run that fails writes no `finished` event; the error is the usual message on stderr and a non-zero exit code.
+
 ## Query Output
 
 ## Text Output (`query`)
