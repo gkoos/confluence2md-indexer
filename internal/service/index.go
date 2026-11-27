@@ -36,6 +36,9 @@ type SourceResult struct {
 	MetadataPath string
 	PageCount    int
 	CheckedFiles int
+	// SkippedFiles counts files a files source left out: links, files over the size limit,
+	// and files that are empty or not text.
+	SkippedFiles int
 }
 
 type IndexResponse struct {
@@ -80,9 +83,8 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	}
 
 	sourceResults := make([]SourceResult, 0, len(sources))
-	var totalPages, totalChecked int
 	for _, source := range sources {
-		summary, err := indexer.Preflight(source.Folder)
+		summary, err := indexer.PreflightSource(source)
 		if err != nil {
 			return nil, fmt.Errorf("index preflight failed for source %q: %w", source.ID, err)
 		}
@@ -94,8 +96,6 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 			PageCount:    summary.PageCount,
 			CheckedFiles: summary.MarkdownChecked,
 		})
-		totalPages += summary.PageCount
-		totalChecked += summary.MarkdownChecked
 	}
 
 	// A rebuild deletes the database files, so it must be the only user; every
@@ -137,15 +137,29 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 
 	var documents []indexer.DocumentInput
 	crawls := make([]indexer.CrawlInfo, 0, len(sources))
-	for _, source := range sources {
+	var totalPages, totalChecked int
+	for i, source := range sources {
 		corpus, err := indexer.LoadSource(source, indexer.DefaultChunkSize, indexer.DefaultChunkOverlap)
 		if err != nil {
 			return nil, fmt.Errorf("index ingestion failed for source %q: %w", source.ID, err)
 		}
 		documents = append(documents, corpus.Documents...)
-		crawls = append(crawls, corpus.Crawl)
+
+		// Only a crawl has crawl times, so a files source must not drag the combined
+		// last-success time to "unknown".
+		if source.Type == indexer.TypeConfluence {
+			crawls = append(crawls, corpus.Crawl)
+		}
+
+		// What was read can differ from what the preflight counted, because a file that
+		// is not text or is empty is only found when it is read.
+		sourceResults[i].PageCount = len(corpus.Documents)
+		sourceResults[i].SkippedFiles = corpus.Skipped
+		totalPages += len(corpus.Documents)
+		totalChecked += sourceResults[i].CheckedFiles
 	}
 	crawl := combineCrawls(crawls)
+	crawl.PageCount = len(documents)
 
 	embProvider, embOptions, embSource, err := resolveIndexProvider(req.Provider, req.Embedding)
 	if err != nil {
