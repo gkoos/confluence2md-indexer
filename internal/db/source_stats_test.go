@@ -24,13 +24,29 @@ func TestSourceStatsCountsDocumentsAndChunksPerSource(t *testing.T) {
 		seedSearchDocument(t, database, doc, chunk)
 	}
 
+	// One document with three chunks and one with none keep the two counters independent:
+	// COUNT(d.id) would inflate documents, and an inner join would drop the chunkless one.
+	multi, first := seedSourceDoc(t, "a/3", "a", "banana one")
+	chunks := []ChunkRecord{
+		first,
+		{ID: "a/3:000001", ChunkIndex: 1, Text: "banana two", ChunkHash: "c-a/3-1"},
+		{ID: "a/3:000002", ChunkIndex: 2, Text: "banana three", ChunkHash: "c-a/3-2"},
+	}
+	if _, _, err := UpsertDocumentWithChunks(ctx, database, multi, chunks, ""); err != nil {
+		t.Fatalf("seed multi-chunk document: %v", err)
+	}
+	chunkless, _ := seedSourceDoc(t, "b/2", "b", "")
+	if _, _, err := UpsertDocumentWithChunks(ctx, database, chunkless, nil, ""); err != nil {
+		t.Fatalf("seed chunkless document: %v", err)
+	}
+
 	got, err := SourceStats(ctx, database)
 	if err != nil {
 		t.Fatalf("SourceStats: %v", err)
 	}
 	want := []SourceStat{
-		{ID: "a", Type: "confluence", Documents: 2, Chunks: 2},
-		{ID: "b", Type: "confluence", Documents: 1, Chunks: 1},
+		{ID: "a", Type: "confluence", Documents: 3, Chunks: 5},
+		{ID: "b", Type: "confluence", Documents: 2, Chunks: 1},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("sources = %+v, want %+v", got, want)
