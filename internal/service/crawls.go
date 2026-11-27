@@ -53,8 +53,9 @@ func combineCrawls(crawls []indexer.CrawlInfo) indexer.CrawlInfo {
 }
 
 // laterTimestamp and earlierTimestamp compare as times, because the crawler writes
-// seconds and a run writes nanoseconds. A value that is not a timestamp never wins over
-// one that is, and the comparison stays total so the result does not depend on order.
+// seconds and a run writes nanoseconds. A value that is not a timestamp wins over one
+// that is, so a corrupt record from any source reaches the freshness check, which rejects
+// it, instead of being hidden by another source. The result does not depend on order.
 func laterTimestamp(a, b string) string {
 	return pickTimestamp(a, b, func(x, y time.Time) bool { return y.After(x) })
 }
@@ -76,11 +77,11 @@ func pickTimestamp(a, b string, preferB func(x, y time.Time) bool) string {
 	tb, errB := time.Parse(time.RFC3339Nano, b)
 	switch {
 	case errA != nil && errB != nil:
-		return a
+		return min(a, b)
 	case errA != nil:
-		return b
-	case errB != nil:
 		return a
+	case errB != nil:
+		return b
 	case preferB(ta, tb):
 		return b
 	default:

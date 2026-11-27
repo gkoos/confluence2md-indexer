@@ -87,3 +87,18 @@ func TestReindexHintNamesTheSources(t *testing.T) {
 		t.Fatalf("several sources: %q, want %q", got, want)
 	}
 }
+
+func TestStatsHintKeepsTheConfiguredSources(t *testing.T) {
+	configured := []config.Source{{ID: "eng", Path: "exports/eng"}, {ID: "support", Path: "exports/support"}}
+
+	got := reindexHint(sourcesFromConfig(configured), "idx.db", "multi.yaml")
+	want := "confluence2md-indexer index --source eng=exports/eng --source support=exports/support --db idx.db --config multi.yaml"
+	if got != want {
+		t.Fatalf("hint = %q, want %q", got, want)
+	}
+
+	// Nothing configured leaves the placeholder, as before.
+	if got := reindexHint(sourcesFromConfig(nil), "idx.db", ""); got != "confluence2md-indexer index <folder> --db idx.db" {
+		t.Fatalf("unconfigured hint = %q", got)
+	}
+}

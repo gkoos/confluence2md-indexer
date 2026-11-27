@@ -10,7 +10,7 @@ It covers:
 
 ## Common Output Conventions
 
-- `schemaVersion`: string version for machine-readable JSON contracts.
+- `schemaVersion`: string version for machine-readable JSON contracts. It is versioned per command: `index` is `"2"`, `query` and `stats` are `"1"`.
 - `command`: command name (`index`, `query`, `stats`).
 - `dbPath`: resolved path to the SQLite database used for the command.
 - **Data goes to stdout, diagnostics to stderr.** Every command that does work writes
@@ -63,8 +63,7 @@ Top-level fields:
 - `rebuild`
 - `dbPath`
 - `embedding`
-- `inputFolder`
-- `metadataPath`
+- `sources`
 - `pageCount`
 - `checkedFiles`
 - `documents`
@@ -80,6 +79,10 @@ Nested fields:
 - `embedding.pruned`: vectors removed because they belonged to another identity.
 - `embedding.dimension`: vector size.
 - `embedding.capability`: `semantic`, `lexical` or `none`.
+- `sources[]`: one entry per source the run read, in the order they were given.
+- `sources[].id|type`: the source id and its type (`confluence`).
+- `sources[].folder|metadataPath`: the resolved folder and its `metadata.json`.
+- `sources[].pageCount|checkedFiles`: pages and markdown files validated for that source. The top-level `pageCount` and `checkedFiles` total them.
 - `documents.inserted|updated|skipped|deleted`: per-run document counters.
 - `dbStats.runs|documents|chunks|embeddings`: DB aggregate counters.
 - `dbStats.vectorReady|vectorName|vectorCapability`: whether the index holds a usable vector channel, and which identity and capability it recorded.

@@ -38,7 +38,7 @@
   "pageCount": 1,
   "rebuild": false,
   "runId": "\u003crun-id\u003e",
-  "schemaVersion": "1",
+  "schemaVersion": "2",
   "sources": [
     {
       "checkedFiles": 1,

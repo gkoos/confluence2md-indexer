@@ -27,6 +27,10 @@ const (
 
 	defaultDBFileName = "confluence2md-index.db"
 	outputSchemaV1    = service.OutputSchemaVersion
+
+	// indexOutputSchemaVersion is 2 because the index payload reports a list of sources
+	// where version 1 reported one inputFolder and metadataPath. Query and stats keep 1.
+	indexOutputSchemaVersion = "2"
 )
 
 // DefaultVersion is what a build the release pipeline did not stamp reports.
@@ -159,7 +163,7 @@ func (a *App) runIndex(args []string) int {
 
 	if *jsonOutput {
 		payload := map[string]any{
-			"schemaVersion": outputSchemaV1,
+			"schemaVersion": indexOutputSchemaVersion,
 			"command":       "index",
 			"status":        indexResp.Status,
 			"incremental":   indexResp.Incremental,
@@ -806,7 +810,7 @@ func (a *App) runStats(args []string) int {
 		// The response is the payload, so the API and the command cannot drift apart.
 		b, _ := json.MarshalIndent(statsResp, "", "  ")
 		fmt.Println(string(b))
-		return staleExit("stats", stats.Corpus, *failIfStale, reindexHint(nil, dbPath, *configPath))
+		return staleExit("stats", stats.Corpus, *failIfStale, reindexHint(sourcesFromConfig(cfg.File.Sources), dbPath, *configPath))
 	}
 
 	fmt.Printf("db path: %s\n", statsResp.DBPath)
@@ -854,7 +858,7 @@ func (a *App) runStats(args []string) int {
 		fmt.Printf("corpus: %s\n", strings.Join(parts, " "))
 	}
 
-	return staleExit("stats", stats.Corpus, *failIfStale, reindexHint(nil, dbPath, *configPath))
+	return staleExit("stats", stats.Corpus, *failIfStale, reindexHint(sourcesFromConfig(cfg.File.Sources), dbPath, *configPath))
 }
 
 // staleExit reports a stale index and returns the exit code the command should use. A
@@ -934,6 +938,17 @@ func resolveIndexSources(folders, specs []string, configured []config.Source) ([
 	}
 
 	return normalizeSources(indexer.SingleSource("."))
+}
+
+// sourcesFromConfig turns the configured sources into the list a re-index command
+// repeats. A hint that left them out would let the folder the user fills in replace
+// the configured list with a single default source, which removes the others' documents.
+func sourcesFromConfig(configured []config.Source) []indexer.Source {
+	sources := make([]indexer.Source, 0, len(configured))
+	for _, source := range configured {
+		sources = append(sources, indexer.Source{ID: source.ID, Type: source.Type, Folder: source.Path})
+	}
+	return sources
 }
 
 func normalizeSources(sources []indexer.Source) ([]indexer.Source, error) {

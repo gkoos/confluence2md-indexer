@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/gkoos/confluence2md-indexer/internal/db"
 	"github.com/gkoos/confluence2md-indexer/internal/indexer"
 )
 
@@ -54,5 +55,25 @@ func TestCombineCrawlsComparesTimesNotStrings(t *testing.T) {
 
 	if got.CompletedAt != "2026-01-01T10:00:30.5Z" {
 		t.Fatalf("completed = %q, want the later time", got.CompletedAt)
+	}
+}
+
+func TestCombineCrawlsLetsAMalformedCompletionReachTheFreshnessCheck(t *testing.T) {
+	for name, crawls := range map[string][]indexer.CrawlInfo{
+		"malformed first": {{CompletedAt: "yesterday"}, {CompletedAt: "2026-01-01T10:00:00Z"}},
+		"malformed last":  {{CompletedAt: "2026-01-01T10:00:00Z"}, {CompletedAt: "yesterday"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			combined := combineCrawls(crawls)
+			if combined.CompletedAt != "yesterday" {
+				t.Fatalf("completed = %q, want the malformed value kept", combined.CompletedAt)
+			}
+
+			// The check that gates CI must reject it rather than pass a corrupt record.
+			snapshot := &db.CorpusSnapshot{CompletedAt: combined.CompletedAt, IndexedAt: "2026-02-01T00:00:00Z"}
+			if _, err := EvaluateFreshness(snapshot); err == nil {
+				t.Fatal("a malformed completion must be an error, not fresh")
+			}
+		})
 	}
 }
