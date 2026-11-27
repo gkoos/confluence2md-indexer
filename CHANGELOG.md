@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.9.1...v1.0.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* schema version 2 and prefixed document ids; an existing index must be rebuilt with --rebuild. IndexRequest takes Sources instead of Folder, and the index JSON output reports sources instead of inputFolder and metadataPath.
+
+### Features
+
+* filter and facet query results by source ([#66](https://github.com/gkoos/confluence2md-indexer/issues/66)) ([6f7ed0a](https://github.com/gkoos/confluence2md-indexer/commit/6f7ed0abffb0b6a2bf3a76767c1a86d3df45554e))
+* index plain folders of Markdown and text files as a files source ([#70](https://github.com/gkoos/confluence2md-indexer/issues/70)) ([3d375c4](https://github.com/gkoos/confluence2md-indexer/commit/3d375c46eafe14d58187750f004454c168cdca4a))
+* index several sources into one database ([#64](https://github.com/gkoos/confluence2md-indexer/issues/64)) ([0e279fb](https://github.com/gkoos/confluence2md-indexer/commit/0e279fba9bb926dadb39ed8007a0d5a37f3bd6ff))
+* remove one source from an index with --remove-source ([#68](https://github.com/gkoos/confluence2md-indexer/issues/68)) ([a9067d6](https://github.com/gkoos/confluence2md-indexer/commit/a9067d62cd7a5738d66c0811e37a0b72e1b34fe8))
+* report index progress as JSON events with --progress ([#67](https://github.com/gkoos/confluence2md-indexer/issues/67)) ([30e6675](https://github.com/gkoos/confluence2md-indexer/commit/30e6675ce07a00aaf47116276d7a364290ffb35a))
+* weight query results by source ([#69](https://github.com/gkoos/confluence2md-indexer/issues/69)) ([1d21a00](https://github.com/gkoos/confluence2md-indexer/commit/1d21a003feab16c4988c7a664967b2c51f630859))
+
 ## [0.9.1](https://github.com/gkoos/confluence2md-indexer/compare/v0.9.0...v0.9.1) (2026-11-27)
 
 
