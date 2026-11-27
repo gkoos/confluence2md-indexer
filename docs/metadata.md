@@ -135,6 +135,7 @@ passed changes nothing:
 | flag | JSON key | meaning |
 | --- | --- | --- |
 | `--space <key>` (repeatable) | `Spaces` | any of these `space_key` values |
+| `--source <id>` (repeatable) | `Sources` | any of these source ids, the ones the index was built with (`--source id=folder` or `sources:`) |
 | `--page-id <id>` | `PageID` | one page |
 | `--parent <id>` | `ParentID` | the direct children of one page; a page with no parent id never matches. A recursive subtree filter is not part of this flag |
 | `--host <host>` | `Host` | one crawled site; matters when a corpus spans hosts, where space keys can repeat |
@@ -167,7 +168,7 @@ of the result set afterwards, never the scores:
 | --- | --- |
 | `--max-per-page N` | at most N chunks of the same document in the ranked list; `0` (default) means unlimited |
 | `--group document` | one result per page instead of one per chunk |
-| `--facets space,author` | per-bucket document counts for the matching set |
+| `--facets space,author,source` | per-bucket document counts for the matching set |
 
 The cap is applied after fusion and priors and before `--top-k`, so the slots a long page
 would have taken with near-duplicate passages go to other documents, and `total` counts

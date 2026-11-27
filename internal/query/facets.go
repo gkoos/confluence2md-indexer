@@ -13,10 +13,12 @@ const (
 	FacetSpace = "space"
 	// FacetAuthor buckets documents by creator and last modifier.
 	FacetAuthor = "author"
+	// FacetSource buckets documents by source id.
+	FacetSource = "source"
 )
 
 // FacetDimensions lists the dimensions a request may ask for, in documentation order.
-var FacetDimensions = []string{FacetSpace, FacetAuthor}
+var FacetDimensions = []string{FacetSpace, FacetAuthor, FacetSource}
 
 // Facets holds per-bucket document counts, keyed by dimension and then by bucket value.
 // It is nil unless the request asked for facets, so a default response stays unchanged.
@@ -128,6 +130,10 @@ func facetValues(dimension string, result Result, candidates map[string]db.Candi
 	case FacetSpace:
 		if space := strings.TrimSpace(result.SpaceKey); space != "" {
 			return []string{space}
+		}
+	case FacetSource:
+		if source := strings.TrimSpace(result.SourceID); source != "" {
+			return []string{source}
 		}
 	case FacetAuthor:
 		candidate, ok := candidates[result.ChunkID]
