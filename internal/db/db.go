@@ -462,6 +462,10 @@ func compactValues(values []string) []string {
 	return compacted
 }
 
+// busyTimeoutMillis is how long a connection waits on a lock held by another
+// process (an index run while the MCP server queries) before reporting it busy.
+const busyTimeoutMillis = 5000
+
 func Open(path string) (*sql.DB, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -477,7 +481,10 @@ func Open(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("create db parent directory: %w", err)
 	}
 
-	database, err := sql.Open("sqlite", filepath.ToSlash(absPath))
+	// Pragmas travel in the DSN because busy_timeout is per connection and the
+	// pool opens connections on demand.
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)", filepath.ToSlash(absPath), busyTimeoutMillis)
+	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
 	}

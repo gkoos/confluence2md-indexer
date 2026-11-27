@@ -41,33 +41,39 @@ func Stats(ctx context.Context, dbPath string) (*StatsResponse, error) {
 		return nil, fmt.Errorf("resolve db path %q: %w", dbPath, err)
 	}
 
-	database, err := db.Open(absPath)
+	lock, err := db.AcquireLock(absPath, false)
 	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = lock.Release() }()
+
+	database, err := db.Open(absPath)
+	if err != nil {
+		return nil, db.WrapBusy(err)
 	}
 	defer func() { _ = database.Close() }()
 
 	// Report a schema this build cannot read before touching any table.
 	if err := db.Verify(ctx, database); err != nil {
-		return nil, err
+		return nil, db.WrapBusy(err)
 	}
 
 	stats, err := db.GetStats(ctx, database)
 	if err != nil {
-		return nil, err
+		return nil, db.WrapBusy(err)
 	}
 
 	// Crawl freshness and metadata coverage belong to this report: index output stays
 	// lean, and stats is where an operator looks for them.
 	coverage, err := db.DocumentMetadataCoverage(ctx, database)
 	if err != nil {
-		return nil, err
+		return nil, db.WrapBusy(err)
 	}
 	stats.Metadata = coverage
 
 	snapshot, err := db.LatestCorpusSnapshot(ctx, database)
 	if err != nil {
-		return nil, err
+		return nil, db.WrapBusy(err)
 	}
 	stats.Corpus = snapshot
 
