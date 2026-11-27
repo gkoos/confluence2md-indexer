@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0](https://github.com/gkoos/confluence2md-indexer/compare/v1.2.0...v1.3.0) (2026-11-27)
+
+
+### Features
+
+* **api:** list space keys through indexerapi.Spaces ([#75](https://github.com/gkoos/confluence2md-indexer/issues/75)) ([34a6bb6](https://github.com/gkoos/confluence2md-indexer/commit/34a6bb68efe631d42ab63c793006e8e977912396))
+
 ## [1.2.0](https://github.com/gkoos/confluence2md-indexer/compare/v1.1.0...v1.2.0) (2026-11-27)
 
 
