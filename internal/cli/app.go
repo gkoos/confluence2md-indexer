@@ -103,7 +103,7 @@ func (a *App) runIndex(args []string) int {
 	progress := fs.Bool("progress", false, "Write one JSON progress event per line to stderr while indexing")
 	skipEmbeddings := fs.Bool("skip-embeddings", false, "Store no embeddings and leave the vector channel empty")
 	var sourceSpecs stringListFlag
-	fs.Var(&sourceSpecs, "source", "Source to index as id=folder; repeatable. Replaces the folder argument and the sources in the configuration file")
+	fs.Var(&sourceSpecs, "source", "Source to index as id=folder or id:type=folder (type confluence or files, detected when omitted); repeatable. Replaces the folder argument and the sources in the configuration file")
 	removeSource := fs.String("remove-source", "", "Remove every document of one source id from the index and exit; needs --db or db.path")
 	embeddingValues := &embeddingFlags{}
 	registerEmbeddingFlags(fs, embeddingValues)
@@ -218,6 +218,11 @@ func (a *App) runIndex(args []string) int {
 		if len(indexResp.Sources) > 1 {
 			for _, source := range indexResp.Sources {
 				fmt.Printf("  source %s (%s): %d pages\n", source.ID, source.Type, source.PageCount)
+			}
+		}
+		for _, source := range indexResp.Sources {
+			if source.SkippedFiles > 0 {
+				fmt.Printf("  source %s: %d files skipped (links, files over the size limit, empty or not text)\n", source.ID, source.SkippedFiles)
 			}
 		}
 		fmt.Printf("db path: %s\n", indexResp.DBPath)
@@ -1067,14 +1072,18 @@ func progressWriter(enabled bool) func(service.ProgressEvent) {
 func sourceResultsJSON(results []service.SourceResult) []map[string]any {
 	out := make([]map[string]any, 0, len(results))
 	for _, result := range results {
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"id":           result.ID,
 			"type":         result.Type,
 			"folder":       result.Folder,
 			"metadataPath": result.MetadataPath,
 			"pageCount":    result.PageCount,
 			"checkedFiles": result.CheckedFiles,
-		})
+		}
+		if result.SkippedFiles > 0 {
+			entry["skippedFiles"] = result.SkippedFiles
+		}
+		out = append(out, entry)
 	}
 	return out
 }

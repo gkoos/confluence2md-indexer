@@ -80,9 +80,10 @@ Nested fields:
 - `embedding.dimension`: vector size.
 - `embedding.capability`: `semantic`, `lexical` or `none`.
 - `sources[]`: one entry per source the run read, in the order they were given.
-- `sources[].id|type`: the source id and its type (`confluence`).
-- `sources[].folder|metadataPath`: the resolved folder and its `metadata.json`.
+- `sources[].id|type`: the source id and its type, `confluence` (crawler output) or `files` (a plain folder).
+- `sources[].folder|metadataPath`: the resolved folder and its `metadata.json`, which is empty for a `files` source.
 - `sources[].pageCount|checkedFiles`: pages and markdown files validated for that source. The top-level `pageCount` and `checkedFiles` total them.
+- optional `sources[].skippedFiles`: for a `files` source, the files left out because they are links, over the size limit, empty or not text.
 - `documents.inserted|updated|skipped|deleted`: per-run document counters.
 - `dbStats.runs|documents|chunks|embeddings`: DB aggregate counters.
 - `dbStats.vectorReady|vectorName|vectorCapability`: whether the index holds a usable vector channel, and which identity and capability it recorded.
@@ -245,7 +246,7 @@ Result object fields:
 - `localPath`
 - `spaceKey`
 - `sourceId`: the source the page came from; `documentId` is this id and the page key joined with a slash
-- `sourceType`: the type of that source, `confluence` for now
+- `sourceType`: the type of that source, `confluence` or `files`. A `files` document has an empty `spaceKey` and `sourceUrl`, and its `localPath` is the path below the source folder
 - `sourceUrl`
 - optional `canonicalUrl` when the crawler recorded one; it is the link to open and is never reconstructed from `sourceUrl`
 - `chunkText`

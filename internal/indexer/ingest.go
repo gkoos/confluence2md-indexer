@@ -74,6 +74,9 @@ type Corpus struct {
 	Documents []DocumentInput
 	// Crawl captures the crawl that produced the output.
 	Crawl CrawlInfo
+	// Skipped counts files a files source left out: links, files over the size limit,
+	// and files that are empty or not text.
+	Skipped int
 }
 
 type ChunkInput struct {
@@ -108,11 +111,16 @@ func LoadCorpus(folder string, chunkSize int, overlap int) (Corpus, error) {
 // LoadSource reads one source and namespaces every document id, and the ids of its
 // chunks, with the source id.
 func LoadSource(source Source, chunkSize int, overlap int) (Corpus, error) {
+	if source.Type == TypeFiles {
+		return loadFiles(source, chunkSize, overlap)
+	}
+
 	return loadCorpus(source, chunkSize, overlap)
 }
 
-func loadCorpus(source Source, chunkSize int, overlap int) (Corpus, error) {
-	folder := source.Folder
+// normalizeChunking fills the chunk size default and keeps the overlap smaller than the
+// chunk, so a caller passing zero values gets a working configuration.
+func normalizeChunking(chunkSize int, overlap int) (int, int) {
 	if chunkSize <= 0 {
 		chunkSize = DefaultChunkSize
 	}
@@ -122,6 +130,13 @@ func loadCorpus(source Source, chunkSize int, overlap int) (Corpus, error) {
 	if overlap >= chunkSize {
 		overlap = chunkSize / 2
 	}
+
+	return chunkSize, overlap
+}
+
+func loadCorpus(source Source, chunkSize int, overlap int) (Corpus, error) {
+	folder := source.Folder
+	chunkSize, overlap = normalizeChunking(chunkSize, overlap)
 
 	absFolder, meta, err := loadMetadata(folder)
 	if err != nil {

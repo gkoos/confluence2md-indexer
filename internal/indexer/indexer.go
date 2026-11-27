@@ -52,6 +52,8 @@ type PreflightSummary struct {
 	MetadataPath    string `json:"metadataPath"`
 	PageCount       int    `json:"pageCount"`
 	MarkdownChecked int    `json:"markdownChecked"`
+	// SkippedFiles is set for a files source: links and oversized files left out.
+	SkippedFiles int `json:"skippedFiles,omitempty"`
 }
 
 func Preflight(folder string) (*PreflightSummary, error) {

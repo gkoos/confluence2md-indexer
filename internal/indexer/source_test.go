@@ -1,6 +1,8 @@
 package indexer
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -10,8 +12,14 @@ func TestParseSourceSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if source.ID != "eng" || source.Folder != "./exports/eng" || source.Type != TypeConfluence {
+	if source.ID != "eng" || source.Folder != "./exports/eng" || source.Type != "" {
 		t.Fatalf("unexpected source: %+v", source)
+	}
+
+	// A type may follow the id, so a plain folder can be named explicitly.
+	typed, err := ParseSourceSpec("notes:files=./notes")
+	if err != nil || typed.ID != "notes" || typed.Type != TypeFiles || typed.Folder != "./notes" {
+		t.Fatalf("typed spec: %+v, %v", typed, err)
 	}
 
 	// Only the first '=' separates the id, so a folder may contain one.
@@ -51,15 +59,33 @@ func TestNormalizeSourcesRejectsBadInput(t *testing.T) {
 	}
 }
 
-func TestNormalizeSourcesDefaultsTypeAndAbsolutizesFolders(t *testing.T) {
-	sources, err := NormalizeSources([]Source{{ID: "eng.v2_x-1", Folder: "relative"}})
+func TestNormalizeSourcesDetectsTheTypeAndAbsolutizesFolders(t *testing.T) {
+	crawled := t.TempDir()
+	if err := os.WriteFile(filepath.Join(crawled, MetadataFileName), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	notes := t.TempDir()
+
+	sources, err := NormalizeSources([]Source{
+		{ID: "crawl", Folder: crawled},
+		{ID: "notes", Folder: notes},
+		{ID: "forced", Type: TypeFiles, Folder: crawled},
+	})
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
-	if sources[0].Type != TypeConfluence {
-		t.Fatalf("type = %q, want %q", sources[0].Type, TypeConfluence)
+
+	for i, want := range []string{TypeConfluence, TypeFiles, TypeFiles} {
+		if sources[i].Type != want {
+			t.Fatalf("source %s type = %q, want %q", sources[i].ID, sources[i].Type, want)
+		}
 	}
-	if !strings.HasSuffix(strings.ReplaceAll(sources[0].Folder, "\\", "/"), "/relative") || sources[0].Folder == "relative" {
-		t.Fatalf("folder was not made absolute: %q", sources[0].Folder)
+
+	relative, err := NormalizeSources([]Source{{ID: "eng.v2_x-1", Folder: "relative"}})
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if !strings.HasSuffix(strings.ReplaceAll(relative[0].Folder, "\\", "/"), "/relative") || relative[0].Folder == "relative" {
+		t.Fatalf("folder was not made absolute: %q", relative[0].Folder)
 	}
 }

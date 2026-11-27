@@ -304,6 +304,8 @@ The indexer reads:
 - `metadata.json` produced by `confluence2md`
 - markdown files referenced by `metadata.pages[*].local_path`
 
+A folder of Markdown and text files with no `metadata.json` is read as a `files` source, described below.
+
 ### Several sources in one index
 
 An index can be built from several folders of crawler output. Give each a source id:
@@ -318,8 +320,23 @@ or list them under `sources:` in the configuration file (see `config.example.yam
 - Several sources have no single folder to hold the database, so `--db` or `db.path` is required. With one source the default database stays inside its folder.
 - A source dropped from the list has its documents removed on the next run, and other sources are untouched.
 - `index --remove-source <id> --db <path>` removes one source's documents without reading any folder, so it works after the folder is gone. It deletes the documents with their chunks, vectors and full-text rows, and reports how many it removed. An id the index does not hold is an error that lists the ids it does, and a missing database is never created.
-- The stored crawl summary combines the sources conservatively: the latest crawl completion, so `--fail-if-stale` trips if any source's crawl finished after the run started, and a last-success time only when every source reported one.
+- The stored crawl summary combines the sources conservatively: the latest crawl completion, so `--fail-if-stale` trips if any source's crawl finished after the run started, and a last-success time only when every source reported one. A `files` source has no crawl, so it takes no part in that summary.
 - An index written by an earlier version is refused with a message to rebuild it; there is no migration.
+
+### Plain folders of files
+
+A source can also be an ordinary folder of notes. The type is detected: a folder with a `metadata.json` is crawler output (`confluence`), and any other folder is `files`. Name it explicitly with `--source notes:files=./my-notes` or `type: files` in the configuration file.
+
+```sh
+confluence2md-indexer index --source wiki=./exports/wiki --source notes=./my-notes --db ./all.db
+```
+
+- It indexes `.md`, `.markdown` and `.txt` files, found recursively, in any case. Everything else is left alone, so binaries, databases and configuration files are never indexed.
+- The document id is the source id and the path below the folder (`notes/ideas/one.md`), and `localPath` is that relative path, so an application can open the file by joining it to the folder. Moving or renaming a file is a deletion plus an addition.
+- The title is the first heading of a Markdown file, or the file name. Front matter is not indexed. Plain text has no headings, so a `#` line in a `.txt` file is just text.
+- The modification time is the file's own, and incremental runs skip a file whose content did not change.
+- Hidden files and folders (names starting with `.`) are skipped. Symbolic links are never followed, so a link cannot lead the walk out of the folder. Files over 8 MiB, empty files, and files that are not UTF-8 text (a NUL byte, or invalid UTF-8) are skipped too. The run reports how many.
+- An empty folder is an error and not an empty source, since indexing it would remove everything the source held; a crawler output folder that lost its `metadata.json` looks the same, and the message says so.
 
 ### Indexing Flow
 

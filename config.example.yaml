@@ -21,7 +21,9 @@ db:
   # folder. With several sources there is no single folder, so set this or pass --db.
   path: ""
 
-# Folders of crawler output to build one index from, each under its own id. Document
+# Folders to build one index from, each under its own id. A folder with a metadata.json
+# is crawler output (type confluence); any other folder is read as plain Markdown and
+# text files (type files). The type is detected when omitted. Document
 # ids are prefixed with the source id, so two sources can hold pages with the same
 # key. A folder argument or --source flags replace this list for one run.
 # sources:
@@ -30,6 +32,9 @@ db:
 #     path: ./exports/engineering
 #   - id: support
 #     path: ./exports/support
+#   - id: notes
+#     type: files
+#     path: ./my-notes
 
 embedding:
   # Provider id. bow-local (default) needs no network; use "list" with

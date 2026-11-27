@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -9,7 +10,10 @@ import (
 
 // Source types an index can read.
 const (
+	// TypeConfluence is a folder of crawler output with a metadata.json.
 	TypeConfluence = "confluence"
+	// TypeFiles is a plain folder of Markdown and text files.
+	TypeFiles = "files"
 )
 
 // DefaultSourceID names the source created for a single folder given without an id.
@@ -30,23 +34,37 @@ type Source struct {
 	Folder string
 }
 
-// SingleSource is the source list for one folder passed without an id.
+// SingleSource is the source list for one folder passed without an id. Its type is
+// detected from the folder when the list is normalised.
 func SingleSource(folder string) []Source {
-	return []Source{{ID: DefaultSourceID, Type: TypeConfluence, Folder: folder}}
+	return []Source{{ID: DefaultSourceID, Folder: folder}}
 }
 
-// ParseSourceSpec reads an "id=folder" flag value.
+// ParseSourceSpec reads an "id=folder" or "id:type=folder" flag value. Without a type,
+// the type is detected from the folder.
 func ParseSourceSpec(spec string) (Source, error) {
-	id, folder, found := strings.Cut(spec, "=")
+	name, folder, found := strings.Cut(spec, "=")
 	if !found {
-		return Source{}, fmt.Errorf("source %q must be written id=folder", spec)
+		return Source{}, fmt.Errorf("source %q must be written id=folder or id:type=folder", spec)
 	}
 
-	return Source{ID: strings.TrimSpace(id), Type: TypeConfluence, Folder: strings.TrimSpace(folder)}, nil
+	id, sourceType, _ := strings.Cut(name, ":")
+
+	return Source{ID: strings.TrimSpace(id), Type: strings.TrimSpace(sourceType), Folder: strings.TrimSpace(folder)}, nil
 }
 
-// NormalizeSources fills the default type, checks every source and returns the list
-// with folders made absolute. An id may appear once.
+// detectType reads the type of a folder that was given none: a crawler output folder
+// carries a metadata.json, and anything else is a plain folder of files.
+func detectType(folder string) string {
+	if info, err := os.Stat(filepath.Join(folder, MetadataFileName)); err == nil && !info.IsDir() {
+		return TypeConfluence
+	}
+
+	return TypeFiles
+}
+
+// NormalizeSources checks every source, detects the type of those that have none, and
+// returns the list with folders made absolute. An id may appear once.
 func NormalizeSources(sources []Source) ([]Source, error) {
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("at least one source is required")
@@ -59,9 +77,6 @@ func NormalizeSources(sources []Source) ([]Source, error) {
 		source.Type = strings.TrimSpace(source.Type)
 		source.Folder = strings.TrimSpace(source.Folder)
 
-		if source.Type == "" {
-			source.Type = TypeConfluence
-		}
 		switch {
 		case source.ID == "":
 			return nil, fmt.Errorf("a source has no id")
@@ -71,7 +86,7 @@ func NormalizeSources(sources []Source) ([]Source, error) {
 			return nil, fmt.Errorf("source id %q may only use letters, digits, '.', '_' and '-', and must start with a letter or digit", source.ID)
 		case seen[source.ID]:
 			return nil, fmt.Errorf("source id %q is used more than once", source.ID)
-		case source.Type != TypeConfluence:
+		case source.Type != "" && source.Type != TypeConfluence && source.Type != TypeFiles:
 			return nil, fmt.Errorf("source %q has unsupported type %q", source.ID, source.Type)
 		case source.Folder == "":
 			return nil, fmt.Errorf("source %q has no folder", source.ID)
@@ -83,6 +98,9 @@ func NormalizeSources(sources []Source) ([]Source, error) {
 			return nil, fmt.Errorf("resolve folder of source %q: %w", source.ID, err)
 		}
 		source.Folder = absolute
+		if source.Type == "" {
+			source.Type = detectType(absolute)
+		}
 
 		normalized = append(normalized, source)
 	}
