@@ -1346,6 +1346,34 @@ func SourceDocumentCounts(ctx context.Context, database *sql.DB) (map[string]int
 	return sourceCounts(ctx, database)
 }
 
+// DistinctSpaces returns the sorted, non-empty space keys the index holds. It is empty,
+// not nil, when no document carries one.
+func DistinctSpaces(ctx context.Context, database *sql.DB) ([]string, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+
+	rows, err := database.QueryContext(ctx, `SELECT DISTINCT space_key FROM documents WHERE space_key <> '' ORDER BY space_key`)
+	if err != nil {
+		return nil, fmt.Errorf("query space keys: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	spaces := []string{}
+	for rows.Next() {
+		var space string
+		if err := rows.Scan(&space); err != nil {
+			return nil, fmt.Errorf("scan space key: %w", err)
+		}
+		spaces = append(spaces, space)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read space keys: %w", err)
+	}
+
+	return spaces, nil
+}
+
 // queryer is what both a database and a transaction offer for reading rows.
 type queryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)

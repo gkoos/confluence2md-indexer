@@ -265,6 +265,13 @@ Marshalling the response gives the payload the command emits (`schemaVersion`, `
 `dbPath`, `stats`), including the `omitempty` blocks, so a service can hand it to a client
 unchanged.
 
+`indexerapi.Spaces` lists the distinct space keys an index holds, sorted and without empty
+ones, under the same shared lock and schema check as `Stats`:
+
+```go
+spaces, err := indexerapi.Spaces(context.Background(), "./output/confluence2md-index.db")
+```
+
 `indexerapi.LoadSettings` reads the same `config.yaml` the CLI reads (the given path, else
 `CONFLUENCE2MD_CONFIG`, else `config.yaml` in the working directory; no file is fine), so an
 embedding application gets the configured database, retrieval defaults and embedding setup
