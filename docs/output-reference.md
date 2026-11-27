@@ -98,7 +98,7 @@ Nested fields:
 | `document` | After each document is stored | `sourceId`, `documentId`, `status` (`inserted`, `updated`, `metadata`, `skipped`), `done`, `total` |
 | `finished` | The run is complete | `done`, `total`, `summary` (`inserted`, `updated`, `metadata`, `skipped`, `deleted`, `chunkWrites`, `embeddingWrites`) |
 
-A run that fails writes no `finished` event; the error is the usual message on stderr and a non-zero exit code.
+An indexing failure writes no `finished` event; the error is the usual message on stderr and a non-zero exit code. `finished` only means the index was written: `--fail-if-stale` is checked after it, so a run can emit `finished` and still exit non-zero. A wrapper must check the process exit code as well as the events.
 
 ## Query Output
 
