@@ -863,6 +863,9 @@ func (a *App) runStats(args []string) int {
 	if stats.VectorCapability != "" {
 		fmt.Printf("vector capability: %s\n", stats.VectorCapability)
 	}
+	for _, source := range stats.Sources {
+		fmt.Printf("source %s (%s): documents=%d chunks=%d\n", source.ID, source.Type, source.Documents, source.Chunks)
+	}
 	if stats.Metadata != nil {
 		fmt.Printf(
 			"metadata: authors=%d links=%d attachments=%d comments=%d seeds=%d nested=%d hosts=%d\n",

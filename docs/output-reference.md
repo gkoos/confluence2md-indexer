@@ -88,6 +88,7 @@ Nested fields:
 - `dbStats.runs|documents|chunks|embeddings`: DB aggregate counters.
 - `dbStats.vectorReady|vectorName|vectorCapability`: whether the index holds a usable vector channel, and which identity and capability it recorded.
 - `dbStats.embeddingModels`: per-identity counters (`name`, `dimension`, `chunks`).
+- `dbStats.sources`: per-source counters (`id`, `type`, `documents`, `chunks`).
 
 ## Progress Events (`index --progress`)
 
@@ -321,6 +322,7 @@ Nested `stats` fields:
 - `vectorName`
 - `vectorCapability`
 - `embeddingModels` (array of `name`, `dimension`, `chunks`)
+- `sources` (array of `id`, `type`, `documents`, `chunks`, ordered by `id`; empty for an index without documents)
 
 ## Notes for Automation
 
