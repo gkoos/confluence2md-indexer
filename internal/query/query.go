@@ -60,6 +60,8 @@ type Result struct {
 	Title             string  `json:"title"`
 	LocalPath         string  `json:"localPath"`
 	SpaceKey          string  `json:"spaceKey"`
+	SourceID          string  `json:"sourceId"`
+	SourceType        string  `json:"sourceType"`
 	SourceURL         string  `json:"sourceUrl"`
 	CanonicalURL      string  `json:"canonicalUrl,omitempty"`
 	ChunkText         string  `json:"chunkText"`
@@ -330,6 +332,8 @@ func fuseWithCandidates(req Request, lexical, vector []db.Candidate) ([]Result, 
 			Title:        c.Title,
 			LocalPath:    c.LocalPath,
 			SpaceKey:     c.SpaceKey,
+			SourceID:     c.SourceID,
+			SourceType:   c.SourceType,
 			SourceURL:    c.SourceURL,
 			CanonicalURL: c.CanonicalURL,
 			ChunkText:    c.ChunkText,

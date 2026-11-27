@@ -439,6 +439,8 @@ func (a *App) runQuery(args []string) int {
 	candidateK := fs.Int("candidate-k", 50, "Candidate count per retrieval channel")
 	spaceList := &stringListFlag{}
 	fs.Var(spaceList, "space", "Filter by space_key; repeatable")
+	sourceList := &stringListFlag{}
+	fs.Var(sourceList, "source", "Filter by source id; repeatable")
 	author := fs.String("author", "", "Filter by creator or last modifier name")
 	createdBy := fs.String("created-by", "", "Filter by creator name")
 	modifiedBy := fs.String("modified-by", "", "Filter by last modifier name")
@@ -458,7 +460,7 @@ func (a *App) runQuery(args []string) int {
 	expand := fs.Int("expand", 0, "Adjacent chunk expansion count")
 	maxPerPage := fs.Int("max-per-page", 0, "Cap chunks per document in the results (0 means unlimited)")
 	group := fs.String("group", "", "Result granularity: document (one result per page); unset keeps chunks")
-	facets := fs.String("facets", "", "Facet counts over the matching set, comma separated: space, author")
+	facets := fs.String("facets", "", "Facet counts over the matching set, comma separated: space, author, source")
 	jsonOutput := fs.Bool("json", false, "Emit machine-readable JSON results")
 	explain := fs.Bool("explain", false, "Include score breakdown and diagnostics")
 	lexicalOnly := fs.Bool("lexical-only", false, "Force lexical retrieval, requiring no embedding provider")
@@ -660,6 +662,7 @@ func (a *App) runQuery(args []string) int {
 		Filters: db.SearchFilters{
 			SpaceKey:       firstSpace(*spaceList),
 			Spaces:         []string(*spaceList),
+			Sources:        []string(*sourceList),
 			PageID:         *pageID,
 			ParentID:       *parent,
 			FromDate:       *fromDate,
@@ -730,6 +733,7 @@ func (a *App) runQuery(args []string) int {
 			fmt.Printf("   context-range=%d..%d (%d chunks)\n", res.ContextStartIndex, res.ContextEndIndex, res.ContextChunkCount)
 		}
 		fmt.Printf("   path=%s\n", res.LocalPath)
+		fmt.Printf("   source=%s\n", res.SourceID)
 		fmt.Printf("   text=%s\n", summarizeText(res.ChunkText, 240))
 	}
 
@@ -1016,6 +1020,7 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Metadata filters, accepted by query (metadata comes from the crawler output):")
 	_, _ = fmt.Fprintln(out, "  --space <key>                space_key, repeatable")
+	_, _ = fmt.Fprintln(out, "  --source <id>                source id from indexing, repeatable")
 	_, _ = fmt.Fprintln(out, "  --page-id <id>               single page")
 	_, _ = fmt.Fprintln(out, "  --host <host>                crawled host, for corpora that span sites")
 	_, _ = fmt.Fprintln(out, "  --author <name>              creator or last modifier, case-insensitive")

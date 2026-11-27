@@ -38,6 +38,8 @@
       "localPath": "page-1001.md",
       "pageId": "1001",
       "rank": 1,
+      "sourceId": "default",
+      "sourceType": "confluence",
       "sourceUrl": "https://example.test/pages/1001",
       "spaceKey": "ENG",
       "title": "Golden Apple Page",

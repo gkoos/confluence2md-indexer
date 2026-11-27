@@ -118,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_documents_modified_by_name ON documents(modified_
 // paired with scanCandidate, so the two stay in step.
 const candidateColumns = `c.id, c.document_id, d.page_id, d.title, d.local_path, d.space_key, d.source_url,
 d.last_modified_at, c.text, c.chunk_index, d.host, d.canonical_url, d.depth, d.is_seed, d.created_by_name,
-d.modified_by_name, d.link_in, d.attachment_count, d.comment_count`
+d.modified_by_name, d.link_in, d.attachment_count, d.comment_count, d.source_id, d.source_type`
 
 // documentColumns lists the writable crawler metadata columns of a document row, in
 // the order documentValues binds them. One list keeps the insert and the two update
@@ -321,6 +321,9 @@ type Candidate struct {
 	LinkIn         int
 	Attachments    int
 	Comments       int
+	// SourceID and SourceType name the source the document came from.
+	SourceID   string
+	SourceType string
 
 	LexicalScoreRaw float64
 	VectorScoreRaw  float64
@@ -340,6 +343,8 @@ type SearchFilters struct {
 	// Host narrows to one crawled site, which matters for corpora that span hosts,
 	// where space keys can repeat.
 	Host string `json:",omitempty"`
+	// Sources narrows to documents from any of these source ids.
+	Sources []string `json:",omitempty"`
 	// Author matches the creator or the last modifier, ignoring case.
 	Author string `json:",omitempty"`
 	// CreatedBy and ModifiedBy match one of those fields on its own.
@@ -390,6 +395,13 @@ func filterClauses(filters SearchFilters) ([]string, []any) {
 		where = append(where, "d.space_key IN ("+questionMarks(len(spaces))+")")
 		for _, space := range spaces {
 			args = append(args, space)
+		}
+	}
+
+	if sources := compactValues(filters.Sources); len(sources) > 0 {
+		where = append(where, "d.source_id IN ("+questionMarks(len(sources))+")")
+		for _, source := range sources {
+			args = append(args, source)
 		}
 	}
 
@@ -1447,6 +1459,7 @@ func scanCandidate(row rowScanner, extra ...any) (Candidate, error) {
 		&c.ChunkID, &c.DocumentID, &c.PageID, &c.Title, &c.LocalPath, &c.SpaceKey, &c.SourceURL,
 		&c.LastModifiedAt, &c.ChunkText, &c.ChunkIndex, &c.Host, &c.CanonicalURL, &c.Depth, &isSeed,
 		&c.CreatedByName, &c.ModifiedByName, &c.LinkIn, &c.Attachments, &c.Comments,
+		&c.SourceID, &c.SourceType,
 	}
 	dest = append(dest, extra...)
 
