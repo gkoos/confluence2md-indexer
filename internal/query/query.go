@@ -44,6 +44,9 @@ type Request struct {
 	// default and omits the facets block entirely.
 	Facets  []string `json:",omitempty"`
 	Filters db.SearchFilters
+	// SourceWeights scales the fused score of every result from the named sources. Empty
+	// is the default and leaves ranking exactly as fusion and priors produced it.
+	SourceWeights map[string]float64 `json:",omitempty"`
 	// Embedding configures provider resolution for this query. It is not part of
 	// the request contract: the command or API layer fills it in.
 	Embedding embedding.Options `json:"-"`
@@ -77,6 +80,9 @@ type Result struct {
 	// MetadataBoost is the adjustment the enabled priors applied, in the same units
 	// as the fused score. It is omitted when no prior is enabled.
 	MetadataBoost float64 `json:"metadataBoost,omitempty"`
+	// SourceWeight is the multiplier the request set for this result's source. It is
+	// omitted when no weight applied, which includes a weight of 1.
+	SourceWeight float64 `json:"sourceWeight,omitempty"`
 	// MetadataFactors holds the normalised value of every enabled prior for this
 	// result, which makes the adjustment explainable.
 	MetadataFactors map[string]float64 `json:"metadataFactors,omitempty"`
@@ -115,6 +121,9 @@ func RunWithFacets(ctx context.Context, database *sql.DB, provider embedding.Pro
 	req.Text = strings.TrimSpace(req.Text)
 	if req.Text == "" {
 		return Response{}, nil
+	}
+	if err := ValidateSourceWeights(req.SourceWeights); err != nil {
+		return Response{}, err
 	}
 
 	dimensions, err := ParseFacets(strings.Join(req.Facets, ","))
@@ -313,6 +322,13 @@ func fuseWithCandidates(req Request, lexical, vector []db.Candidate) ([]Result, 
 	lexical = withSignal(lexical, func(c db.Candidate) float64 { return c.LexicalScoreRaw })
 	vector = withSignal(vector, func(c db.Candidate) float64 { return c.VectorScoreRaw })
 
+	// Source weights scale the raw scores before they are normalised; rank fusion has no
+	// raw scores, so it is weighted after fusion instead.
+	if !usesRRF(req) {
+		lexical = scaleRawScores(lexical, req.SourceWeights, func(c *db.Candidate, w float64) { c.LexicalScoreRaw *= w })
+		vector = scaleRawScores(vector, req.SourceWeights, func(c *db.Candidate, w float64) { c.VectorScoreRaw *= w })
+	}
+
 	lexNorm := normalizeScores(lexical, func(c db.Candidate) float64 { return c.LexicalScoreRaw })
 	vecNorm := normalizeScores(vector, func(c db.Candidate) float64 { return c.VectorScoreRaw })
 
@@ -338,6 +354,9 @@ func fuseWithCandidates(req Request, lexical, vector []db.Candidate) ([]Result, 
 			CanonicalURL: c.CanonicalURL,
 			ChunkText:    c.ChunkText,
 			ChunkIndex:   c.ChunkIndex,
+		}
+		if weight, ok := req.SourceWeights[c.SourceID]; ok && weight != 1 {
+			r.SourceWeight = weight
 		}
 		combined[c.ChunkID] = r
 		return r
@@ -375,6 +394,9 @@ func fuseWithCandidates(req Request, lexical, vector []db.Candidate) ([]Result, 
 	// candidates that fusion produced but never invent relevance of their own.
 	if req.Priors.Enabled() {
 		applyPriors(req.Priors, combined, candidates)
+	}
+	if usesRRF(req) {
+		weightRankedScores(req.SourceWeights, combined, candidates)
 	}
 
 	out := make([]Result, 0, len(combined))
