@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0](https://github.com/gkoos/confluence2md-indexer/compare/v1.1.0...v1.2.0) (2026-11-27)
+
+
+### Features
+
+* **stats:** report documents and chunks per source ([#73](https://github.com/gkoos/confluence2md-indexer/issues/73)) ([bbc9899](https://github.com/gkoos/confluence2md-indexer/commit/bbc989995a57ba2a5bfdd9561a69ec14c3e17dab))
+
 ## [1.1.0](https://github.com/gkoos/confluence2md-indexer/compare/v1.0.0...v1.1.0) (2026-11-27)
 
 
