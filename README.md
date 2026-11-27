@@ -317,6 +317,7 @@ or list them under `sources:` in the configuration file (see `config.example.yam
 - Document ids are prefixed with the source id (`engineering/<host>/<page id>`), so two sources can hold pages with the same key without colliding. The page's own key stays in `pageId`.
 - Several sources have no single folder to hold the database, so `--db` or `db.path` is required. With one source the default database stays inside its folder.
 - A source dropped from the list has its documents removed on the next run, and other sources are untouched.
+- `index --remove-source <id> --db <path>` removes one source's documents without reading any folder, so it works after the folder is gone. It deletes the documents with their chunks, vectors and full-text rows, and reports how many it removed. An id the index does not hold is an error that lists the ids it does, and a missing database is never created.
 - The stored crawl summary combines the sources conservatively: the latest crawl completion, so `--fail-if-stale` trips if any source's crawl finished after the run started, and a last-success time only when every source reported one.
 - An index written by an earlier version is refused with a message to rebuild it; there is no migration.
 

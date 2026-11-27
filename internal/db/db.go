@@ -1149,6 +1149,10 @@ func UpsertEmbeddings(ctx context.Context, database *sql.DB, records []Embedding
 	return written, nil
 }
 
+// DeleteDocumentsNotIn removes every document whose id is not listed, with its chunks,
+// vectors and full-text rows. The full-text table is not covered by the foreign keys, so
+// its rows are deleted explicitly; left behind, they would duplicate a chunk's lexical hit
+// once a document with the same chunk ids is indexed again.
 func DeleteDocumentsNotIn(ctx context.Context, database *sql.DB, keepIDs []string) (int64, error) {
 	if database == nil {
 		return 0, fmt.Errorf("database is nil")
@@ -1164,34 +1168,90 @@ func DeleteDocumentsNotIn(ctx context.Context, database *sql.DB, keepIDs []strin
 	sort.Strings(clean)
 
 	if len(clean) == 0 {
-		res, err := database.ExecContext(ctx, `DELETE FROM documents`)
-		if err != nil {
-			return 0, fmt.Errorf("delete all documents: %w", err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return 0, fmt.Errorf("rows affected deleting all documents: %w", err)
-		}
-		return rows, nil
+		return deleteDocumentsWhere(ctx, database, "1=1")
 	}
 
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(clean)), ",")
-	query := fmt.Sprintf("DELETE FROM documents WHERE id NOT IN (%s)", placeholders)
 	args := make([]any, len(clean))
 	for i, id := range clean {
 		args[i] = id
 	}
 
-	res, err := database.ExecContext(ctx, query, args...)
+	return deleteDocumentsWhere(ctx, database, "id NOT IN ("+questionMarks(len(clean))+")", args...)
+}
+
+// DeleteDocumentsInSource removes every document one source contributed, with its chunks,
+// vectors and full-text rows, and leaves the other sources alone. It reports how many
+// documents it removed.
+func DeleteDocumentsInSource(ctx context.Context, database *sql.DB, sourceID string) (int64, error) {
+	if database == nil {
+		return 0, fmt.Errorf("database is nil")
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return 0, fmt.Errorf("source id is empty")
+	}
+
+	return deleteDocumentsWhere(ctx, database, "source_id = ?", sourceID)
+}
+
+// deleteDocumentsWhere deletes the documents a predicate selects, together with their
+// full-text rows, in one transaction so an interruption cannot leave one without the
+// other. The predicate is written against the documents table.
+func deleteDocumentsWhere(ctx context.Context, database *sql.DB, predicate string, args ...any) (int64, error) {
+	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("delete stale documents: %w", err)
+		return 0, fmt.Errorf("begin delete tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	const ftsDelete = `DELETE FROM chunks_fts WHERE chunk_id IN (
+SELECT c.id FROM chunks c WHERE c.document_id IN (SELECT id FROM documents WHERE %s))`
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(ftsDelete, predicate), args...); err != nil {
+		return 0, fmt.Errorf("delete full-text rows: %w", err)
+	}
+
+	res, err := tx.ExecContext(ctx, "DELETE FROM documents WHERE "+predicate, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete documents: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("rows affected deleting stale documents: %w", err)
+		return 0, fmt.Errorf("rows affected deleting documents: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit delete tx: %w", err)
 	}
 
 	return rows, nil
+}
+
+// SourceDocumentCounts reports how many documents each source holds, keyed by source id.
+func SourceDocumentCounts(ctx context.Context, database *sql.DB) (map[string]int, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+
+	rows, err := database.QueryContext(ctx, `SELECT source_id, COUNT(*) FROM documents GROUP BY source_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count documents per source: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var id string
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, fmt.Errorf("scan source count: %w", err)
+		}
+		counts[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate source counts: %w", err)
+	}
+
+	return counts, nil
 }
 
 func SearchLexical(ctx context.Context, database *sql.DB, queryText string, filters SearchFilters) ([]Candidate, error) {

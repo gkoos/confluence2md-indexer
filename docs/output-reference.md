@@ -100,6 +100,19 @@ Nested fields:
 
 An indexing failure writes no `finished` event; the error is the usual message on stderr and a non-zero exit code. `finished` only means the index was written: `--fail-if-stale` is checked after it, so a run can emit `finished` and still exit non-zero. A wrapper must check the process exit code as well as the events.
 
+## Remove Source Output (`index --remove-source`)
+
+Text output prints `removed <n> documents of source <id> from <db>` and `documents remaining: <n>`. With `--json` the payload is:
+
+- `schemaVersion`: `"1"`
+- `command`: `remove-source`
+- `dbPath`
+- `sourceId`
+- `deleted`: documents removed
+- `remainingDocuments`: documents left across the other sources
+
+The command exits 2 for an unknown source id, a missing database, or when combined with a folder, `--source` or `--rebuild`.
+
 ## Query Output
 
 ## Text Output (`query`)
