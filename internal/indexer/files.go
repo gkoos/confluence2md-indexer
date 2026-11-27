@@ -2,7 +2,9 @@ package indexer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -24,7 +26,6 @@ var indexableExtensions = map[string]bool{".md": true, ".markdown": true, ".txt"
 type sourceFile struct {
 	// RelPath is the path below the source folder, with forward slashes.
 	RelPath string
-	AbsPath string
 	ModTime time.Time
 }
 
@@ -33,6 +34,11 @@ type sourceFile struct {
 //
 // Hidden files and folders are skipped. Symbolic links are never followed or listed, so a
 // link inside the folder cannot lead the walk outside it.
+//
+// An error is only tolerated for something that has disappeared since the walk reached it.
+// Any other failure, such as an unreadable subfolder, stops the scan: a listing that
+// silently lacks part of the tree would make the index treat the missing documents as
+// deleted and remove them.
 func scanFiles(root string) ([]sourceFile, int, error) {
 	info, err := os.Stat(root)
 	if err != nil {
@@ -50,11 +56,10 @@ func scanFiles(root string) ([]sourceFile, int, error) {
 
 	err = filepath.WalkDir(root, func(p string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			if p == root {
-				return walkErr
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
 			}
-			skipped++
-			return nil
+			return walkErr
 		}
 		if p == root {
 			return nil
@@ -75,17 +80,22 @@ func scanFiles(root string) ([]sourceFile, int, error) {
 		}
 
 		entryInfo, err := entry.Info()
-		if err != nil || !entryInfo.Mode().IsRegular() || entryInfo.Size() > maxFileSize {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if !entryInfo.Mode().IsRegular() || entryInfo.Size() > maxFileSize {
 			skipped++
 			return nil
 		}
 
 		rel, err := filepath.Rel(root, p)
 		if err != nil {
-			skipped++
-			return nil
+			return err
 		}
-		files = append(files, sourceFile{RelPath: filepath.ToSlash(rel), AbsPath: p, ModTime: entryInfo.ModTime()})
+		files = append(files, sourceFile{RelPath: filepath.ToSlash(rel), ModTime: entryInfo.ModTime()})
 
 		return nil
 	})
@@ -128,8 +138,19 @@ func PreflightFiles(folder string) (*PreflightSummary, error) {
 }
 
 // loadFiles reads a files source: one document per Markdown or text file, identified by its
-// path below the folder. A file that is not text, is empty, or vanishes between the scan and
-// the read is left out and counted, so one bad file cannot fail the run.
+// path below the folder. A file that is not text, is empty or is over the size limit is left
+// out and counted, and one that vanished between the scan and the read is simply gone.
+//
+// Every other read failure stops the run. Leaving the file out would drop its document from
+// the corpus, and the index removes documents the corpus no longer holds, so a permission
+// or I/O error would delete stored documents. A corpus with no documents at all is
+// rejected for the same reason: a folder emptied or made unreadable since the preflight
+// must not wipe what the source held.
+//
+// Files are opened through an os.Root on the source folder, which refuses any path that
+// resolves outside it, symbolic links included. The scan already skips links, so this
+// only matters if one is swapped in afterwards, and it keeps the containment from
+// depending on that earlier check.
 func loadFiles(source Source, chunkSize int, overlap int) (Corpus, error) {
 	chunkSize, overlap = normalizeChunking(chunkSize, overlap)
 
@@ -138,10 +159,25 @@ func loadFiles(source Source, chunkSize int, overlap int) (Corpus, error) {
 		return Corpus{}, err
 	}
 
+	root, err := os.OpenRoot(source.Folder)
+	if err != nil {
+		return Corpus{}, fmt.Errorf("open source folder %s: %w", source.Folder, err)
+	}
+	defer func() { _ = root.Close() }()
+
 	docs := make([]DocumentInput, 0, len(files))
 	for _, file := range files {
-		content, err := os.ReadFile(file.AbsPath)
-		if err != nil || !isText(content) {
+		content, err := readConfined(root, file.RelPath)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case errors.Is(err, errSkipFile):
+			skipped++
+			continue
+		case err != nil:
+			return Corpus{}, fmt.Errorf("read %s in source folder %s: %w", file.RelPath, source.Folder, err)
+		}
+		if !isText(content) {
 			skipped++
 			continue
 		}
@@ -195,7 +231,43 @@ func loadFiles(source Source, chunkSize int, overlap int) (Corpus, error) {
 		})
 	}
 
+	if len(docs) == 0 {
+		return Corpus{}, fmt.Errorf("no indexable text files in source folder %s (%d files were empty, not text, or over the size limit)", source.Folder, skipped)
+	}
+
 	return Corpus{Documents: docs, Crawl: CrawlInfo{PageCount: len(docs)}, Skipped: skipped}, nil
+}
+
+// errSkipFile marks a file that is left out on purpose: not a regular file, or too large.
+var errSkipFile = errors.New("file is not indexable")
+
+// readConfined reads one file below a root without leaving it. The size is checked on the
+// opened handle and the read is capped, so a file that grew since the scan cannot be read
+// whole either.
+func readConfined(root *os.Root, rel string) ([]byte, error) {
+	file, err := root.Open(filepath.FromSlash(rel))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errSkipFile
+	}
+
+	content, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > maxFileSize {
+		return nil, errSkipFile
+	}
+
+	return content, nil
 }
 
 // isText reports whether bytes look like text: valid UTF-8 with no NUL byte. A NUL near the
