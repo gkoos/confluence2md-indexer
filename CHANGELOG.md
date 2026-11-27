@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0](https://github.com/gkoos/confluence2md-indexer/compare/v1.0.0...v1.1.0) (2026-11-27)
+
+
+### Features
+
+* **api:** expose configuration settings through indexerapi ([#71](https://github.com/gkoos/confluence2md-indexer/issues/71)) ([d0a0a70](https://github.com/gkoos/confluence2md-indexer/commit/d0a0a70db6a9ce6fa658b4204264bbd477bdd3d6))
+
 ## [1.0.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.9.1...v1.0.0) (2026-11-27)
 
 
