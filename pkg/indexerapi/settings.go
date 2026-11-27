@@ -2,6 +2,7 @@ package indexerapi
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gkoos/confluence2md-indexer/internal/config"
@@ -60,10 +61,10 @@ func (s *Settings) QueryDefaults() (QueryRequest, error) {
 	}
 
 	if fileQuery.Mode != nil {
-		req.Mode = *fileQuery.Mode
+		req.Mode = strings.TrimSpace(*fileQuery.Mode)
 	}
 	if fileQuery.Fusion != nil {
-		req.Fusion = *fileQuery.Fusion
+		req.Fusion = strings.TrimSpace(*fileQuery.Fusion)
 	}
 	if fileQuery.Alpha != nil {
 		req.Alpha = *fileQuery.Alpha
@@ -114,9 +115,17 @@ func (s *Settings) ResolveEmbedding(explicit EmbeddingOptions, present Embedding
 		return EmbeddingOptions{}, err
 	}
 
-	return config.MergeEmbedding(
+	merged := config.MergeEmbedding(
 		embedding.Layer{Name: embedding.SourceFlag, Options: explicit, Present: present},
 		embedding.Layer{Name: embedding.SourceEnv, Options: envOptions, Present: envPresent},
 		s.file,
-	), nil
+	)
+
+	// The merge shares slices with the loaded file; clone them so a caller editing its
+	// request cannot change what later calls on these Settings return.
+	merged.Headers = slices.Clone(merged.Headers)
+	merged.QueryParams = slices.Clone(merged.QueryParams)
+	merged.Context = slices.Clone(merged.Context)
+
+	return merged, nil
 }

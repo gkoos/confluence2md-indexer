@@ -131,3 +131,40 @@ embedding:
 		t.Fatalf("an explicit value must beat the environment: %+v", explicit)
 	}
 }
+
+func TestQueryDefaultsTrimModeAndFusion(t *testing.T) {
+	settings, err := LoadSettings(writeSettings(t, "query:\n  mode: \" lexical \"\n  fusion: \" rrf \"\n"))
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	req, err := settings.QueryDefaults()
+	if err != nil {
+		t.Fatalf("QueryDefaults: %v", err)
+	}
+	if req.Mode != "lexical" || req.Fusion != "rrf" {
+		t.Fatalf("mode/fusion = %q/%q, want trimmed lexical/rrf", req.Mode, req.Fusion)
+	}
+}
+
+func TestResolveEmbeddingDoesNotShareSlicesWithSettings(t *testing.T) {
+	settings, err := LoadSettings(writeSettings(t, "embedding:\n  provider: bow-local\n  headers: [\"X-One=1\"]\n  context: title\n"))
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	first, err := settings.ResolveEmbedding(EmbeddingOptions{}, EmbeddingPresent{})
+	if err != nil {
+		t.Fatalf("ResolveEmbedding: %v", err)
+	}
+	first.Headers[0] = "X-Changed=2"
+	first.Context[0] = "space"
+
+	second, err := settings.ResolveEmbedding(EmbeddingOptions{}, EmbeddingPresent{})
+	if err != nil {
+		t.Fatalf("ResolveEmbedding: %v", err)
+	}
+	if second.Headers[0] != "X-One=1" || second.Context[0] != "title" {
+		t.Fatalf("editing one result leaked into the next: %v / %v", second.Headers, second.Context)
+	}
+}
