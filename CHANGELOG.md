@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1](https://github.com/gkoos/confluence2md-indexer/compare/v0.9.0...v0.9.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **db:** WAL mode, busy timeout and a cross-process lock for rebuild ([#62](https://github.com/gkoos/confluence2md-indexer/issues/62)) ([4e23ca9](https://github.com/gkoos/confluence2md-indexer/commit/4e23ca9d12faa3c0e57aea1c7bcb379c2542ebc1))
+
 ## [0.9.0](https://github.com/gkoos/confluence2md-indexer/compare/v0.8.0...v0.9.0) (2026-10-21)
 
 
