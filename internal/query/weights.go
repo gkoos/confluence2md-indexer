@@ -8,11 +8,20 @@ import (
 	"github.com/gkoos/confluence2md-indexer/internal/db"
 )
 
+// Bounds on a source weight. A weight is a multiplier on scores that are small numbers,
+// so a range this wide is far more than ranking can use, and it keeps every product
+// finite: a weight of 1e308 on a raw score of 4 overflows to infinity, and min-max
+// normalisation of that gives NaN, which breaks ranking and JSON output.
+const (
+	MinSourceWeight = 1e-6
+	MaxSourceWeight = 1e6
+)
+
 // ValidateSourceWeights rejects weights that cannot scale a score. A weight is a
-// multiplier on the fused score, so it has to be a positive, finite number; excluding a
-// source is what the --source filter is for, and a zero weight would only hide results
-// without saying so. A source id the index does not hold is accepted, because the same
-// weights can be configured for several indexes.
+// multiplier, so it has to be a finite number between MinSourceWeight and MaxSourceWeight;
+// excluding a source is what the --source filter is for, and a zero weight would only hide
+// results without saying so. A source id the index does not hold is accepted, because the
+// same weights can be configured for several indexes.
 func ValidateSourceWeights(weights map[string]float64) error {
 	for id, weight := range weights {
 		switch {
@@ -20,6 +29,8 @@ func ValidateSourceWeights(weights map[string]float64) error {
 			return fmt.Errorf("a source weight has no source id")
 		case math.IsNaN(weight) || math.IsInf(weight, 0) || weight <= 0:
 			return fmt.Errorf("weight of source %q must be a positive number, got %v (use the source filter to exclude a source)", id, weight)
+		case weight < MinSourceWeight || weight > MaxSourceWeight:
+			return fmt.Errorf("weight of source %q must be between %g and %g, got %v", id, MinSourceWeight, MaxSourceWeight, weight)
 		}
 	}
 
@@ -60,7 +71,9 @@ func scaleRawScores(candidates []db.Candidate, weights map[string]float64, scale
 
 // weightRankedScores scales fused reciprocal-rank scores, which come from ranks and not
 // from the raw scores, by the weight of their source. Those scores are positive and do
-// not pass through min-max normalisation, so a multiplier is enough.
+// not pass through min-max normalisation, so a multiplier is enough. The metadata boost
+// the priors already folded into the score is scaled with it, so the boost still reports
+// its share of the score in the same units.
 func weightRankedScores(weights map[string]float64, combined map[string]*Result, candidates map[string]db.Candidate) {
 	for chunkID, result := range combined {
 		candidate, ok := candidates[chunkID]
@@ -69,6 +82,7 @@ func weightRankedScores(weights map[string]float64, combined map[string]*Result,
 		}
 		if weight, ok := weights[candidate.SourceID]; ok && weight != 1 {
 			result.Fused *= weight
+			result.MetadataBoost *= weight
 		}
 	}
 }

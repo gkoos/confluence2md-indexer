@@ -164,7 +164,7 @@ normalisation maps it to exactly zero.
 In an index built from several sources, `--source-weight id=weight` (repeatable) or
 `query.source_weights` in the configuration file makes one source count for more or less:
 a weight of 2 counts that source's relevance twice over, 0.5 counts it half. Weights must
-be positive and finite; to leave a source out, use `--source`. A weight of 1, or an id the
+be between 0.000001 and 1000000; to leave a source out, use `--source`. A weight of 1, or an id the
 index does not hold, changes nothing.
 
 The weight scales the raw channel score before normalisation, so it can move a result

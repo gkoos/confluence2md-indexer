@@ -13,6 +13,9 @@ func TestValidateSourceWeights(t *testing.T) {
 	if err := ValidateSourceWeights(map[string]float64{"a": 0.25, "b": 2, "c": 1}); err != nil {
 		t.Fatalf("positive weights must be valid: %v", err)
 	}
+	if err := ValidateSourceWeights(map[string]float64{"low": MinSourceWeight, "high": MaxSourceWeight}); err != nil {
+		t.Fatalf("the bounds themselves must be valid: %v", err)
+	}
 
 	for name, weights := range map[string]map[string]float64{
 		"zero":       {"a": 0},
@@ -21,6 +24,8 @@ func TestValidateSourceWeights(t *testing.T) {
 		"infinite":   {"a": math.Inf(1)},
 		"blank id":   {" ": 1},
 		"one of two": {"ok": 1, "bad": 0},
+		"too large":  {"a": 1e308},
+		"too small":  {"a": 1e-9},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := ValidateSourceWeights(weights)
