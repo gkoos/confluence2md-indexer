@@ -231,6 +231,8 @@ Result object fields:
 - `title`
 - `localPath`
 - `spaceKey`
+- `sourceId`: the source the page came from; `documentId` is this id and the page key joined with a slash
+- `sourceType`: the type of that source, `confluence` for now
 - `sourceUrl`
 - optional `canonicalUrl` when the crawler recorded one; it is the link to open and is never reconstructed from `sourceUrl`
 - `chunkText`

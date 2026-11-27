@@ -92,9 +92,9 @@ confluence2md-indexer query --q text
   [--mode hybrid|lexical|vector]
   [--fusion weighted|rrf] [--alpha 0..1] [--rrf-k N]
   [--top-k N] [--candidate-k N]
-  [--max-per-page N] [--group document] [--facets space,author]
+  [--max-per-page N] [--group document] [--facets space,author,source]
   [--offset N] [--limit N]
-  [--space key] [--host host] [--page-id id] [--parent id]
+  [--space key] [--source id] [--host host] [--page-id id] [--parent id]
   [--author name] [--created-by name] [--modified-by name]
   [--depth-min N] [--depth-max N] [--seed-only] [--has-attachments]
   [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--updated-since 30d]
@@ -137,7 +137,7 @@ folder that was re-crawled entirely after it. Details in
 [docs/operations.md](docs/operations.md).
 
 The crawler metadata is indexed too, so a query can be narrowed by what it describes:
-`--author`, `--created-by`, `--modified-by`, `--host`, repeated `--space`, `--page-id`,
+`--author`, `--created-by`, `--modified-by`, `--host`, repeated `--space`, repeated `--source`, `--page-id`,
 `--parent` (the direct children of one page), `--depth-min` and `--depth-max`,
 `--seed-only`, `--has-attachments` and `--updated-since 30d`. All of
 them are opt-in, and all of them apply to every retrieval mode. `--max-per-page N` caps
