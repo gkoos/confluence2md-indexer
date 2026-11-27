@@ -41,6 +41,12 @@ func Stats(ctx context.Context, dbPath string) (*StatsResponse, error) {
 		return nil, fmt.Errorf("resolve db path %q: %w", dbPath, err)
 	}
 
+	lock, err := db.AcquireLock(absPath, false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Release() }()
+
 	database, err := db.Open(absPath)
 	if err != nil {
 		return nil, db.WrapBusy(err)

@@ -401,6 +401,8 @@ Use `Est. chunks` with the sizing ranges above to choose incremental vs rebuild 
 Operational limitations:
 
 - Rebuild mode recreates the DB file (destructive to prior DB content at that path).
+- The index is opened in WAL mode with a 5 second busy timeout, so queries keep working while an index run writes.
+- Every command locks the index through a `<db>.lock` file next to it. Query, stats and incremental indexing share it; `--rebuild` needs it exclusively, because it deletes the database files. A rebuild while another process is using the index waits up to 5 seconds and then fails with an "index is busy" error, leaving the database untouched. The `.lock` file is safe to delete when nothing is running. A tool that opens the database directly, without going through this indexer, is not covered.
 - Index and query must use the same embedding identity; a mismatch is reported instead of returning empty results.
 - SQLite write concurrency is limited; avoid parallel writers to the same DB file.
 - Query latency grows with corpus size, filter breadth, and candidate counts.

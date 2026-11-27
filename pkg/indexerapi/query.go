@@ -48,6 +48,12 @@ func Query(ctx context.Context, dbPath string, req QueryRequest) (*QueryResponse
 		provider = resolution.Provider
 	}
 
+	lock, err := db.AcquireLock(dbPath, false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Release() }()
+
 	database, err := db.Open(dbPath)
 	if err != nil {
 		return nil, db.WrapBusy(err)

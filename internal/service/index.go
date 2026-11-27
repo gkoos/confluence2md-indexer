@@ -68,6 +68,14 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index preflight failed: %w", err)
 	}
 
+	// A rebuild deletes the database files, so it must be the only user; every
+	// other run shares the index with queries.
+	lock, err := db.AcquireLock(dbPath, req.Rebuild)
+	if err != nil {
+		return nil, fmt.Errorf("index lock failed: %w", err)
+	}
+	defer func() { _ = lock.Release() }()
+
 	if req.Rebuild {
 		// The WAL and shared-memory sidecars belong to the file being replaced.
 		for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
