@@ -501,8 +501,10 @@ func Open(path string) (*sql.DB, error) {
 	}
 
 	// Pragmas travel in the DSN because busy_timeout is per connection and the
-	// pool opens connections on demand.
-	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)", filepath.ToSlash(absPath), busyTimeoutMillis)
+	// pool opens connections on demand. Transactions begin immediate, taking the write
+	// lock up front: a deferred one that reads before it writes cannot wait for another
+	// writer and fails at once with SQLITE_BUSY, whatever the busy timeout says.
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_txlock=immediate", filepath.ToSlash(absPath), busyTimeoutMillis)
 	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
@@ -1149,6 +1151,10 @@ func UpsertEmbeddings(ctx context.Context, database *sql.DB, records []Embedding
 	return written, nil
 }
 
+// DeleteDocumentsNotIn removes every document whose id is not listed, with its chunks,
+// vectors and full-text rows. The full-text table is not covered by the foreign keys, so
+// its rows are deleted explicitly; left behind, they would duplicate a chunk's lexical hit
+// once a document with the same chunk ids is indexed again.
 func DeleteDocumentsNotIn(ctx context.Context, database *sql.DB, keepIDs []string) (int64, error) {
 	if database == nil {
 		return 0, fmt.Errorf("database is nil")
@@ -1164,36 +1170,158 @@ func DeleteDocumentsNotIn(ctx context.Context, database *sql.DB, keepIDs []strin
 	sort.Strings(clean)
 
 	if len(clean) == 0 {
-		res, err := database.ExecContext(ctx, `DELETE FROM documents`)
-		if err != nil {
-			return 0, fmt.Errorf("delete all documents: %w", err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return 0, fmt.Errorf("rows affected deleting all documents: %w", err)
-		}
-		return rows, nil
+		return deleteDocumentsWhere(ctx, database, "1=1")
 	}
 
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(clean)), ",")
-	query := fmt.Sprintf("DELETE FROM documents WHERE id NOT IN (%s)", placeholders)
 	args := make([]any, len(clean))
 	for i, id := range clean {
 		args[i] = id
 	}
 
-	res, err := database.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("delete stale documents: %w", err)
+	return deleteDocumentsWhere(ctx, database, "id NOT IN ("+questionMarks(len(clean))+")", args...)
+}
+
+// ErrSourceNotFound is returned by RemoveSourceDocuments when the index holds no
+// document from the requested source.
+var ErrSourceNotFound = errors.New("no documents from that source")
+
+// SourceRemoval is the outcome of RemoveSourceDocuments.
+type SourceRemoval struct {
+	// Deleted counts the documents removed, and Remaining the documents the other sources
+	// still hold, both read in the transaction that removed them.
+	Deleted   int64
+	Remaining int64
+	// Known maps every source id the index holds to its document count. It is only set
+	// with ErrSourceNotFound, so the caller can name the sources that do exist.
+	Known map[string]int
+}
+
+// RemoveSourceDocuments removes every document one source contributed, with its chunks,
+// vectors and full-text rows, and leaves the other sources alone.
+//
+// Everything happens in one transaction, and the delete comes first: that takes the
+// write lock before anything is read, so a concurrent removal or indexing run cannot
+// change the counts between the check and the deletion. Two removals of the same source
+// cannot both succeed, and the remaining count describes the index as this removal left it.
+func RemoveSourceDocuments(ctx context.Context, database *sql.DB, sourceID string) (SourceRemoval, error) {
+	if database == nil {
+		return SourceRemoval{}, fmt.Errorf("database is nil")
 	}
-	rows, err := res.RowsAffected()
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return SourceRemoval{}, fmt.Errorf("source id is empty")
+	}
+
+	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("rows affected deleting stale documents: %w", err)
+		return SourceRemoval{}, fmt.Errorf("begin remove tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	deleted, err := deleteDocumentsInTx(ctx, tx, "source_id = ?", sourceID)
+	if err != nil {
+		return SourceRemoval{}, err
+	}
+
+	if deleted == 0 {
+		known, err := sourceCounts(ctx, tx)
+		if err != nil {
+			return SourceRemoval{}, err
+		}
+		return SourceRemoval{Known: known}, ErrSourceNotFound
+	}
+
+	var remaining int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM documents`).Scan(&remaining); err != nil {
+		return SourceRemoval{}, fmt.Errorf("count remaining documents: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return SourceRemoval{}, fmt.Errorf("commit remove tx: %w", err)
+	}
+
+	return SourceRemoval{Deleted: deleted, Remaining: remaining}, nil
+}
+
+// deleteDocumentsWhere deletes the documents a predicate selects, together with their
+// full-text rows, in one transaction so an interruption cannot leave one without the
+// other. The predicate is written against the documents table.
+func deleteDocumentsWhere(ctx context.Context, database *sql.DB, predicate string, args ...any) (int64, error) {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin delete tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := deleteDocumentsInTx(ctx, tx, predicate, args...)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit delete tx: %w", err)
 	}
 
 	return rows, nil
 }
 
+// deleteDocumentsInTx deletes the documents a predicate selects and their full-text rows,
+// which no foreign key covers, inside the caller's transaction.
+func deleteDocumentsInTx(ctx context.Context, tx *sql.Tx, predicate string, args ...any) (int64, error) {
+	const ftsDelete = `DELETE FROM chunks_fts WHERE chunk_id IN (
+SELECT c.id FROM chunks c WHERE c.document_id IN (SELECT id FROM documents WHERE %s))`
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(ftsDelete, predicate), args...); err != nil {
+		return 0, fmt.Errorf("delete full-text rows: %w", err)
+	}
+
+	res, err := tx.ExecContext(ctx, "DELETE FROM documents WHERE "+predicate, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete documents: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected deleting documents: %w", err)
+	}
+
+	return rows, nil
+}
+
+// SourceDocumentCounts reports how many documents each source holds, keyed by source id.
+func SourceDocumentCounts(ctx context.Context, database *sql.DB) (map[string]int, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+
+	return sourceCounts(ctx, database)
+}
+
+// queryer is what both a database and a transaction offer for reading rows.
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func sourceCounts(ctx context.Context, q queryer) (map[string]int, error) {
+	rows, err := q.QueryContext(ctx, `SELECT source_id, COUNT(*) FROM documents GROUP BY source_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count documents per source: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var id string
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, fmt.Errorf("scan source count: %w", err)
+		}
+		counts[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate source counts: %w", err)
+	}
+
+	return counts, nil
+}
 func SearchLexical(ctx context.Context, database *sql.DB, queryText string, filters SearchFilters) ([]Candidate, error) {
 	if database == nil {
 		return nil, fmt.Errorf("database is nil")

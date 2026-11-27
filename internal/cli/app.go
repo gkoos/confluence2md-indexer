@@ -103,6 +103,7 @@ func (a *App) runIndex(args []string) int {
 	skipEmbeddings := fs.Bool("skip-embeddings", false, "Store no embeddings and leave the vector channel empty")
 	var sourceSpecs stringListFlag
 	fs.Var(&sourceSpecs, "source", "Source to index as id=folder; repeatable. Replaces the folder argument and the sources in the configuration file")
+	removeSource := fs.String("remove-source", "", "Remove every document of one source id from the index and exit; needs --db or db.path")
 	embeddingValues := &embeddingFlags{}
 	registerEmbeddingFlags(fs, embeddingValues)
 
@@ -131,6 +132,22 @@ func (a *App) runIndex(args []string) int {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
 		return exitCodeInvalidUsage
 	}
+
+	// The flag counts as given even when its value is blank, so an empty variable in a
+	// script is rejected here and cannot fall through to ordinary indexing, which with
+	// --rebuild would recreate the whole index.
+	if flagNamesVisited(fs)["remove-source"] {
+		if strings.TrimSpace(*removeSource) == "" {
+			fmt.Fprintln(os.Stderr, "index: --remove-source needs a source id")
+			return exitCodeInvalidUsage
+		}
+		if len(folders) > 0 || len(sourceSpecs) > 0 || *rebuild {
+			fmt.Fprintln(os.Stderr, "index: --remove-source cannot be combined with a folder, --source or --rebuild")
+			return exitCodeInvalidUsage
+		}
+		return a.runRemoveSource(*removeSource, *dbPathFlag, cfg.File.DBPath(), *jsonOutput)
+	}
+
 	options, err := resolveEmbeddingOptions(flagOptions, embeddingValues.present(fs), cfg.File)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "index: %v\n", err)
@@ -975,6 +992,53 @@ func resolveIndexDBPath(sources []indexer.Source, dbPathFlag string, configuredP
 	return resolveDBPath(sources[0].Folder, dbPathFlag, configuredPath)
 }
 
+// runRemoveSource drops one source's documents from an existing index. There is no folder
+// to put a default database in, so the database has to be named.
+func (a *App) runRemoveSource(sourceID, dbPathFlag, configuredPath string, jsonOutput bool) int {
+	if strings.TrimSpace(dbPathFlag) == "" && strings.TrimSpace(configuredPath) == "" {
+		fmt.Fprintln(os.Stderr, "index: --remove-source needs --db or db.path")
+		return exitCodeInvalidUsage
+	}
+	dbPath, err := filepath.Abs(firstNonBlank(dbPathFlag, configuredPath))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "index: resolve db path: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+
+	resp, err := service.RemoveSource(context.Background(), dbPath, sourceID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "index: %v\n", err)
+		return exitCodeInvalidUsage
+	}
+
+	if jsonOutput {
+		b, _ := json.MarshalIndent(map[string]any{
+			"schemaVersion":      outputSchemaV1,
+			"command":            "remove-source",
+			"dbPath":             resp.DBPath,
+			"sourceId":           resp.SourceID,
+			"deleted":            resp.Deleted,
+			"remainingDocuments": resp.RemainingDocuments,
+		}, "", "  ")
+		fmt.Println(string(b))
+		return exitCodeOK
+	}
+
+	fmt.Printf("removed %d documents of source %s from %s\n", resp.Deleted, resp.SourceID, resp.DBPath)
+	fmt.Printf("documents remaining: %d\n", resp.RemainingDocuments)
+	return exitCodeOK
+}
+
+// firstNonBlank returns the first value that carries something other than whitespace.
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // progressWriter returns the callback that prints progress events, or nil when progress
 // was not asked for. Events go to stderr as one JSON object per line, so stdout keeps
 // carrying only the final result; the version line on stderr is the one non-JSON line.
@@ -1029,6 +1093,7 @@ func (a *App) printUsage(out *os.File) {
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Usage:")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index [folder] [--db path] [--config file] [--rebuild] [--json] [--skip-embeddings] [--source id=folder ...] [--progress]")
+	_, _ = fmt.Fprintln(out, "  confluence2md-indexer index --remove-source id --db path [--config file] [--json]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer query --q text [--db path] [--config file] [--mode hybrid|lexical|vector] [--fusion weighted|rrf] [--offset N] [--limit N] [--json] [--explain] [--lexical-only]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer stats [--db path] [--config file] [--json]")
 	_, _ = fmt.Fprintln(out, "  confluence2md-indexer --version")
