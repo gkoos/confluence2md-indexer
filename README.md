@@ -265,6 +265,29 @@ Marshalling the response gives the payload the command emits (`schemaVersion`, `
 `dbPath`, `stats`), including the `omitempty` blocks, so a service can hand it to a client
 unchanged.
 
+`indexerapi.LoadSettings` reads the same `config.yaml` the CLI reads (the given path, else
+`CONFLUENCE2MD_CONFIG`, else `config.yaml` in the working directory; no file is fine), so an
+embedding application gets the configured database, retrieval defaults and embedding setup
+without re-implementing the precedence rules:
+
+```go
+settings, err := indexerapi.LoadSettings("") // or an explicit path
+
+req, err := settings.QueryDefaults()         // built-in defaults overlaid with the file's query section
+req.Text = "deployment rollback"             // set the question and any per-call overrides
+req.Embedding, err = settings.ResolveEmbedding(
+	indexerapi.EmbeddingOptions{},           // explicit values, highest precedence
+	indexerapi.EmbeddingPresent{},           // which of them were actually set
+)
+
+resp, err := indexerapi.Query(ctx, settings.DBPath(), req) // DBPath is "" when the file sets none
+```
+
+`QueryDefaults` carries mode, fusion, alpha, top-k, candidate-k, expand, priors and source
+weights. `ResolveEmbedding` applies explicit values, then `CONFLUENCE2MD_EMBEDDING_*`
+variables, then the file's `embedding` section, then built-in defaults, exactly as the
+command line does.
+
 `indexerapi.Query` opens and closes a SQLite connection per call. For occasional use this is fine. If you are issuing many queries in a single session (typical for MCP), open the database once and call `query.Run` directly:
 
 ```go
