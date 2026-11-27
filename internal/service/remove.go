@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -60,27 +61,17 @@ func RemoveSource(ctx context.Context, dbPath string, sourceID string) (*RemoveS
 		return nil, db.WrapBusy(err)
 	}
 
-	counts, err := db.SourceDocumentCounts(ctx, database)
+	// The check, the deletion and the remaining count all happen in one transaction, so a
+	// concurrent removal cannot change what this one reports.
+	removal, err := db.RemoveSourceDocuments(ctx, database, sourceID)
+	if errors.Is(err, db.ErrSourceNotFound) {
+		return nil, fmt.Errorf("index holds no documents from source %q%s", sourceID, describeSources(removal.Known))
+	}
 	if err != nil {
 		return nil, db.WrapBusy(err)
 	}
-	if counts[sourceID] == 0 {
-		return nil, fmt.Errorf("index holds no documents from source %q%s", sourceID, describeSources(counts))
-	}
 
-	deleted, err := db.DeleteDocumentsInSource(ctx, database, sourceID)
-	if err != nil {
-		return nil, db.WrapBusy(err)
-	}
-
-	remaining := 0
-	for id, count := range counts {
-		if id != sourceID {
-			remaining += count
-		}
-	}
-
-	return &RemoveSourceResponse{DBPath: dbPath, SourceID: sourceID, Deleted: int(deleted), RemainingDocuments: remaining}, nil
+	return &RemoveSourceResponse{DBPath: dbPath, SourceID: sourceID, Deleted: int(removal.Deleted), RemainingDocuments: int(removal.Remaining)}, nil
 }
 
 // describeSources renders the sources an index holds for an error message.

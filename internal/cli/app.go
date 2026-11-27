@@ -133,7 +133,14 @@ func (a *App) runIndex(args []string) int {
 		return exitCodeInvalidUsage
 	}
 
-	if strings.TrimSpace(*removeSource) != "" {
+	// The flag counts as given even when its value is blank, so an empty variable in a
+	// script is rejected here and cannot fall through to ordinary indexing, which with
+	// --rebuild would recreate the whole index.
+	if flagNamesVisited(fs)["remove-source"] {
+		if strings.TrimSpace(*removeSource) == "" {
+			fmt.Fprintln(os.Stderr, "index: --remove-source needs a source id")
+			return exitCodeInvalidUsage
+		}
 		if len(folders) > 0 || len(sourceSpecs) > 0 || *rebuild {
 			fmt.Fprintln(os.Stderr, "index: --remove-source cannot be combined with a folder, --source or --rebuild")
 			return exitCodeInvalidUsage

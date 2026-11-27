@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func seedSourceDoc(t *testing.T, id, source, text string) (DocumentRecord, Chunk
 		}
 }
 
-func TestDeleteDocumentsInSourceRemovesOnlyThatSource(t *testing.T) {
+func TestRemoveSourceDocumentsRemovesOnlyThatSource(t *testing.T) {
 	database := newTestDatabase(t)
 	ctx := context.Background()
 
@@ -29,9 +30,9 @@ func TestDeleteDocumentsInSourceRemovesOnlyThatSource(t *testing.T) {
 		seedSearchDocument(t, database, doc, chunk)
 	}
 
-	deleted, err := DeleteDocumentsInSource(ctx, database, "a")
-	if err != nil || deleted != 2 {
-		t.Fatalf("deleted = %d, err = %v, want 2", deleted, err)
+	removal, err := RemoveSourceDocuments(ctx, database, "a")
+	if err != nil || removal.Deleted != 2 || removal.Remaining != 1 {
+		t.Fatalf("removal = %+v, err = %v, want 2 deleted and 1 remaining", removal, err)
 	}
 
 	counts, err := SourceDocumentCounts(ctx, database)
@@ -57,7 +58,7 @@ func TestDeletedDocumentsDoNotDuplicateTheirHitsWhenIndexedAgain(t *testing.T) {
 	seedSearchDocument(t, database, doc, chunk)
 
 	for name, remove := range map[string]func() error{
-		"by source": func() error { _, err := DeleteDocumentsInSource(ctx, database, "a"); return err },
+		"by source": func() error { _, err := RemoveSourceDocuments(ctx, database, "a"); return err },
 		"not in":    func() error { _, err := DeleteDocumentsNotIn(ctx, database, []string{"other"}); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -79,8 +80,29 @@ func TestDeletedDocumentsDoNotDuplicateTheirHitsWhenIndexedAgain(t *testing.T) {
 	}
 }
 
-func TestDeleteDocumentsInSourceRejectsAnEmptyID(t *testing.T) {
-	if _, err := DeleteDocumentsInSource(context.Background(), newTestDatabase(t), "  "); err == nil {
+func TestRemoveSourceDocumentsRejectsAnEmptyID(t *testing.T) {
+	if _, err := RemoveSourceDocuments(context.Background(), newTestDatabase(t), "  "); err == nil {
 		t.Fatal("an empty source id must be rejected, not treated as every document")
+	}
+}
+
+func TestRemoveSourceDocumentsReportsUnknownSourcesAndChangesNothing(t *testing.T) {
+	database := newTestDatabase(t)
+	ctx := context.Background()
+
+	doc, chunk := seedSourceDoc(t, "a/1", "a", "banana text")
+	seedSearchDocument(t, database, doc, chunk)
+
+	removal, err := RemoveSourceDocuments(ctx, database, "typo")
+	if !errors.Is(err, ErrSourceNotFound) {
+		t.Fatalf("err = %v, want ErrSourceNotFound", err)
+	}
+	if removal.Known["a"] != 1 || len(removal.Known) != 1 {
+		t.Fatalf("known sources = %v, want a with one document", removal.Known)
+	}
+
+	counts, err := SourceDocumentCounts(ctx, database)
+	if err != nil || counts["a"] != 1 {
+		t.Fatalf("a rejected removal must change nothing: %v, %v", counts, err)
 	}
 }

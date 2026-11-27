@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gkoos/confluence2md-indexer/internal/db"
@@ -109,4 +111,49 @@ func mustSourceCounts(t *testing.T, dbPath string) map[string]int {
 		t.Fatalf("counts: %v", err)
 	}
 	return counts
+}
+
+func TestConcurrentRemovalsOfOneSourceSucceedExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "index.db")
+	if _, err := Index(ctx, IndexRequest{
+		Sources: []indexer.Source{{ID: "a", Folder: writeSourceFolder(t, "text a")}, {ID: "b", Folder: writeSourceFolder(t, "text b")}},
+		DBPath:  dbPath,
+	}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	const workers = 6
+	results := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := RemoveSource(ctx, dbPath, "a")
+			if err == nil && (resp.Deleted != 1 || resp.RemainingDocuments != 1) {
+				err = fmt.Errorf("a successful removal reported deleted=%d remaining=%d, want 1 and 1", resp.Deleted, resp.RemainingDocuments)
+			}
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	succeeded := 0
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case strings.Contains(err.Error(), "holds no documents from source"):
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("%d removals succeeded, want exactly one", succeeded)
+	}
+	if counts := mustSourceCounts(t, dbPath); counts["b"] != 1 || len(counts) != 1 {
+		t.Fatalf("counts = %v, want only b with one document", counts)
+	}
 }
