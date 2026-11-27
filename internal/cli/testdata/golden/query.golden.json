@@ -28,10 +28,10 @@
   "results": [
     {
       "canonicalUrl": "https://example.test/pages/1001-canonical",
-      "chunkId": "1001:000000",
+      "chunkId": "default/1001:000000",
       "chunkIndex": 0,
       "chunkText": "# Golden Apple Page\n\nThis page contains apple and banana examples for deterministic hybrid retrieval tests.",
-      "documentId": "1001",
+      "documentId": "default/1001",
       "fusedScore": 1,
       "fusion": "weighted",
       "lexicalScore": 1,

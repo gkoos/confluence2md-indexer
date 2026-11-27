@@ -35,11 +35,19 @@
     "written": 1
   },
   "incremental": true,
-  "inputFolder": "\u003cinput-folder\u003e",
-  "metadataPath": "\u003cmetadata-path\u003e",
   "pageCount": 1,
   "rebuild": false,
   "runId": "\u003crun-id\u003e",
   "schemaVersion": "1",
+  "sources": [
+    {
+      "checkedFiles": 1,
+      "folder": "\u003cinput-folder\u003e",
+      "id": "default",
+      "metadataPath": "\u003cmetadata-path\u003e",
+      "pageCount": 1,
+      "type": "confluence"
+    }
+  ],
   "status": "phase4-ready"
 }

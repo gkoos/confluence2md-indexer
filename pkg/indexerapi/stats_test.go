@@ -183,7 +183,7 @@ func TestStatsRefusesAFutureSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if _, err := database.ExecContext(ctx, "PRAGMA user_version = 2;"); err != nil {
+	if _, err := database.ExecContext(ctx, "PRAGMA user_version = 3;"); err != nil {
 		t.Fatalf("stamp schema version: %v", err)
 	}
 	if err := database.Close(); err != nil {
@@ -191,7 +191,7 @@ func TestStatsRefusesAFutureSchema(t *testing.T) {
 	}
 
 	_, err = Stats(ctx, dbPath)
-	want := "database schema 2 is newer than the schema this build writes (1); upgrade confluence2md-indexer"
+	want := "database schema 3 is newer than the schema this build writes (2); upgrade confluence2md-indexer"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
 	}
@@ -231,7 +231,7 @@ func TestStatsRefusesAnUnversionedIndex(t *testing.T) {
 	}
 
 	_, err = Stats(ctx, dbPath)
-	want := "database schema 0 is not the schema this build writes (1); rebuild the index with: confluence2md-indexer index <folder> --rebuild"
+	want := "database schema 0 is not the schema this build writes (2); rebuild the index with: confluence2md-indexer index <folder> --rebuild"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
 	}

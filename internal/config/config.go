@@ -33,6 +33,9 @@ type Config struct {
 type File struct {
 	DB        *DB        `mapstructure:"db"`
 	Embedding *Embedding `mapstructure:"embedding"`
+	// Sources lists the folders the index command builds one index from. A folder
+	// argument or a --source flag replaces the whole list for that run.
+	Sources []Source `mapstructure:"sources"`
 	// Query holds retrieval defaults for the query command. Every field is optional:
 	// a flag the caller passes wins over the file, so a configured default can always
 	// be overridden or cleared per invocation.
@@ -57,6 +60,14 @@ type Query struct {
 	TopK       *int     `mapstructure:"top_k"`
 	CandidateK *int     `mapstructure:"candidate_k"`
 	Expand     *int     `mapstructure:"expand"`
+}
+
+// Source is one folder of crawler output to index.
+type Source struct {
+	ID string `mapstructure:"id"`
+	// Type defaults to confluence.
+	Type string `mapstructure:"type"`
+	Path string `mapstructure:"path"`
 }
 
 // DB holds index storage settings.

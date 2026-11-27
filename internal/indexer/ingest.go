@@ -35,8 +35,12 @@ type Metadata struct {
 }
 
 type DocumentInput struct {
-	ID          string
+	// ID is the page key prefixed with the source id, so it is unique across sources.
+	ID string
+	// PageID is the key the source itself uses for the page.
 	PageID      string
+	SourceID    string
+	SourceType  string
 	Title       string
 	LocalPath   string
 	SpaceKey    string
@@ -95,8 +99,20 @@ func LoadDocuments(folder string, chunkSize int, overlap int) ([]DocumentInput, 
 }
 
 // LoadCorpus reads metadata.json, the markdown files it references, and the crawl
-// information the metadata file carries.
+// information the metadata file carries. Documents keep the crawler's own page keys
+// as ids and belong to no source; use LoadSource to namespace them.
 func LoadCorpus(folder string, chunkSize int, overlap int) (Corpus, error) {
+	return loadCorpus(Source{Folder: folder}, chunkSize, overlap)
+}
+
+// LoadSource reads one source and namespaces every document id, and the ids of its
+// chunks, with the source id.
+func LoadSource(source Source, chunkSize int, overlap int) (Corpus, error) {
+	return loadCorpus(source, chunkSize, overlap)
+}
+
+func loadCorpus(source Source, chunkSize int, overlap int) (Corpus, error) {
+	folder := source.Folder
 	if chunkSize <= 0 {
 		chunkSize = DefaultChunkSize
 	}
@@ -142,10 +158,15 @@ func LoadCorpus(folder string, chunkSize int, overlap int) (Corpus, error) {
 		sections := splitSections(clean)
 		drafts := chunkSections(sections, chunkSize, overlap)
 
+		docID := pageID
+		if source.ID != "" {
+			docID = source.ID + "/" + pageID
+		}
+
 		chunks := make([]ChunkInput, 0, len(drafts))
 		for i, draft := range drafts {
 			chunks = append(chunks, ChunkInput{
-				ID:         ChunkID(pageID, i),
+				ID:         ChunkID(docID, i),
 				ChunkIndex: i,
 				Text:       draft.Text,
 				ChunkHash:  ContentHash(draft.Text),
@@ -154,8 +175,10 @@ func LoadCorpus(folder string, chunkSize int, overlap int) (Corpus, error) {
 		}
 
 		docs = append(docs, DocumentInput{
-			ID:          pageID,
+			ID:          docID,
 			PageID:      pageID,
+			SourceID:    source.ID,
+			SourceType:  source.Type,
 			Title:       strings.TrimSpace(page.Title),
 			LocalPath:   filepath.ToSlash(localPath),
 			SpaceKey:    strings.TrimSpace(page.SpaceKey),

@@ -13,7 +13,9 @@ import (
 )
 
 type IndexRequest struct {
-	Folder  string
+	// Sources are the folders the index is built from. Documents are namespaced by
+	// source id, and anything the index holds that no source lists any more is removed.
+	Sources []indexer.Source
 	DBPath  string
 	Rebuild bool
 	// Provider overrides provider resolution. Tests inject a deterministic
@@ -21,6 +23,16 @@ type IndexRequest struct {
 	Provider embedding.Provider
 	// Embedding configures provider resolution when Provider is nil.
 	Embedding embedding.Options
+}
+
+// SourceResult is what one source contributed to an index run.
+type SourceResult struct {
+	ID           string
+	Type         string
+	Folder       string
+	MetadataPath string
+	PageCount    int
+	CheckedFiles int
 }
 
 type IndexResponse struct {
@@ -34,12 +46,13 @@ type IndexResponse struct {
 	EmbeddingPruned     int
 	EmbeddingDimension  int
 	EmbeddingCapability string
-	InputFolder         string
-	MetadataPath        string
-	PageCount           int
-	CheckedFiles        int
-	Inserted            int
-	Updated             int
+	// Sources lists what each source contributed, in the order they were given.
+	Sources []SourceResult
+	// PageCount and CheckedFiles total the sources.
+	PageCount    int
+	CheckedFiles int
+	Inserted     int
+	Updated      int
 	// MetadataUpdates counts pages whose text was unchanged but whose crawler
 	// metadata moved; they are refreshed without re-embedding anything.
 	MetadataUpdates int
@@ -54,18 +67,32 @@ type IndexResponse struct {
 }
 
 func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
-	folder := strings.TrimSpace(req.Folder)
-	if folder == "" {
-		return nil, fmt.Errorf("index requires a non-empty folder")
+	sources, err := indexer.NormalizeSources(req.Sources)
+	if err != nil {
+		return nil, fmt.Errorf("index sources are invalid: %w", err)
 	}
 	dbPath := strings.TrimSpace(req.DBPath)
 	if dbPath == "" {
 		return nil, fmt.Errorf("index requires a non-empty --db path")
 	}
 
-	summary, err := indexer.Preflight(folder)
-	if err != nil {
-		return nil, fmt.Errorf("index preflight failed: %w", err)
+	sourceResults := make([]SourceResult, 0, len(sources))
+	var totalPages, totalChecked int
+	for _, source := range sources {
+		summary, err := indexer.Preflight(source.Folder)
+		if err != nil {
+			return nil, fmt.Errorf("index preflight failed for source %q: %w", source.ID, err)
+		}
+		sourceResults = append(sourceResults, SourceResult{
+			ID:           source.ID,
+			Type:         source.Type,
+			Folder:       summary.FolderPath,
+			MetadataPath: summary.MetadataPath,
+			PageCount:    summary.PageCount,
+			CheckedFiles: summary.MarkdownChecked,
+		})
+		totalPages += summary.PageCount
+		totalChecked += summary.MarkdownChecked
 	}
 
 	// A rebuild deletes the database files, so it must be the only user; every
@@ -105,10 +132,17 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		return nil, fmt.Errorf("index run tracking failed: %w", err)
 	}
 
-	corpus, err := indexer.LoadCorpus(folder, indexer.DefaultChunkSize, indexer.DefaultChunkOverlap)
-	if err != nil {
-		return nil, fmt.Errorf("index ingestion failed: %w", err)
+	var documents []indexer.DocumentInput
+	crawls := make([]indexer.CrawlInfo, 0, len(sources))
+	for _, source := range sources {
+		corpus, err := indexer.LoadSource(source, indexer.DefaultChunkSize, indexer.DefaultChunkOverlap)
+		if err != nil {
+			return nil, fmt.Errorf("index ingestion failed for source %q: %w", source.ID, err)
+		}
+		documents = append(documents, corpus.Documents...)
+		crawls = append(crawls, corpus.Crawl)
 	}
+	crawl := combineCrawls(crawls)
 
 	embProvider, embOptions, embSource, err := resolveIndexProvider(req.Provider, req.Embedding)
 	if err != nil {
@@ -130,12 +164,14 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	}
 
 	var inserted, updated, metadataUpdates, skipped, chunkWrites, embeddingWrites int
-	keepIDs := make([]string, 0, len(corpus.Documents))
-	for _, doc := range corpus.Documents {
+	keepIDs := make([]string, 0, len(documents))
+	for _, doc := range documents {
 		keepIDs = append(keepIDs, doc.ID)
 		docRecord := db.DocumentRecord{
 			ID:             doc.ID,
 			PageID:         doc.PageID,
+			SourceID:       doc.SourceID,
+			SourceType:     doc.SourceType,
 			Title:          doc.Title,
 			LocalPath:      doc.LocalPath,
 			SpaceKey:       doc.SpaceKey,
@@ -179,7 +215,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 
 		status, written, err := db.UpsertDocumentWithChunks(ctx, database, docRecord, chunkRecords, embeddingName, headerFields)
 		if err != nil {
-			return nil, fmt.Errorf("index persistence failed for page %s: %w", doc.PageID, err)
+			return nil, fmt.Errorf("index persistence failed for page %s: %w", doc.ID, err)
 		}
 		switch status {
 		case "inserted":
@@ -196,7 +232,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		if written > 0 && len(chunkRecords) > 0 && embProvider.Caps().Enabled() {
 			vectors, err := embProvider.Embed(ctx, embedding.KindDocument, chunkTexts)
 			if err != nil {
-				return nil, fmt.Errorf("index embedding failed for page %s: %w", doc.PageID, err)
+				return nil, fmt.Errorf("index embedding failed for page %s: %w", doc.ID, err)
 			}
 			recs := make([]db.EmbeddingRecord, 0, len(vectors))
 			for i, vec := range vectors {
@@ -212,7 +248,7 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 			}
 			writtenEmbeddings, err := db.UpsertEmbeddings(ctx, database, recs)
 			if err != nil {
-				return nil, fmt.Errorf("index embedding persistence failed for page %s: %w", doc.PageID, err)
+				return nil, fmt.Errorf("index embedding persistence failed for page %s: %w", doc.ID, err)
 			}
 			embeddingWrites += writtenEmbeddings
 		}
@@ -246,12 +282,12 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 	// stale the index is relative to the crawler output.
 	snapshot := db.CorpusSnapshot{
 		RunID:       run.ID,
-		StartedAt:   corpus.Crawl.StartedAt,
-		CompletedAt: corpus.Crawl.CompletedAt,
-		SucceededAt: corpus.Crawl.SucceededAt,
-		Mode:        corpus.Crawl.Mode,
-		SeedCount:   corpus.Crawl.SeedCount,
-		PageCount:   corpus.Crawl.PageCount,
+		StartedAt:   crawl.StartedAt,
+		CompletedAt: crawl.CompletedAt,
+		SucceededAt: crawl.SucceededAt,
+		Mode:        crawl.Mode,
+		SeedCount:   crawl.SeedCount,
+		PageCount:   crawl.PageCount,
 	}
 	if err := db.RecordCorpusSnapshot(ctx, database, run.ID, snapshot); err != nil {
 		return nil, fmt.Errorf("index corpus snapshot failed: %w", err)
@@ -275,10 +311,9 @@ func Index(ctx context.Context, req IndexRequest) (*IndexResponse, error) {
 		EmbeddingPruned:     pruned,
 		EmbeddingDimension:  embProvider.Dimension(),
 		EmbeddingCapability: embProvider.Caps().Capability(),
-		InputFolder:         summary.FolderPath,
-		MetadataPath:        summary.MetadataPath,
-		PageCount:           summary.PageCount,
-		CheckedFiles:        summary.MarkdownChecked,
+		Sources:             sourceResults,
+		PageCount:           totalPages,
+		CheckedFiles:        totalChecked,
 		Inserted:            inserted,
 		Updated:             updated,
 		MetadataUpdates:     metadataUpdates,

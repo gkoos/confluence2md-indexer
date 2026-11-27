@@ -249,6 +249,35 @@ func TestLoadRejectsMissingFiles(t *testing.T) {
 	})
 }
 
+func TestLoadReadsSources(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+sources:
+  - id: engineering
+    type: confluence
+    path: ./exports/eng
+  - id: support
+    path: ./exports/support
+`))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	want := []Source{
+		{ID: "engineering", Type: "confluence", Path: "./exports/eng"},
+		{ID: "support", Path: "./exports/support"},
+	}
+	if !reflect.DeepEqual(cfg.File.Sources, want) {
+		t.Fatalf("sources = %+v, want %+v", cfg.File.Sources, want)
+	}
+}
+
+func TestLoadRejectsUnknownSourceKeys(t *testing.T) {
+	_, err := Load(writeConfig(t, "sources:\n  - id: a\n    folder: ./x\n"))
+	if err == nil {
+		t.Fatal("a misspelled source key must fail loudly")
+	}
+}
+
 func TestLoadRejectsUnknownKeys(t *testing.T) {
 	cases := map[string]struct {
 		content string
