@@ -34,6 +34,14 @@
       "withLinks": 0
     },
     "runs": 1,
+    "sources": [
+      {
+        "chunks": 1,
+        "documents": 1,
+        "id": "default",
+        "type": "confluence"
+      }
+    ],
     "vectorCapability": "lexical",
     "vectorName": "bow-local:fnv1a@256",
     "vectorReady": true

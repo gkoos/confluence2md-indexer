@@ -172,6 +172,16 @@ type Stats struct {
 	Metadata *MetadataCoverage `json:"metadata,omitempty"`
 	// Corpus reports the crawl the index was built from, when a run recorded one.
 	Corpus *CorpusSnapshot `json:"corpus,omitempty"`
+	// Sources counts what each source contributes, ordered by source id.
+	Sources []SourceStat `json:"sources"`
+}
+
+// SourceStat counts the documents and chunks one source contributes to the index.
+type SourceStat struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Documents int    `json:"documents"`
+	Chunks    int    `json:"chunks"`
 }
 
 // MetadataCoverage counts the documents that carry a metadata value.
@@ -702,7 +712,48 @@ func GetStats(ctx context.Context, database *sql.DB) (*Stats, error) {
 	stats.VectorReady = stats.VectorName != ""
 	stats.VectorCapability = manifest.Capability
 
+	sources, err := SourceStats(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	stats.Sources = sources
+
 	return stats, nil
+}
+
+// SourceStats counts documents and chunks per source id. It is empty, not nil, for an
+// index without documents, so the JSON field is always an array.
+func SourceStats(ctx context.Context, database *sql.DB) ([]SourceStat, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+
+	const q = `
+SELECT d.source_id, d.source_type, COUNT(DISTINCT d.id), COUNT(c.id)
+FROM documents d
+LEFT JOIN chunks c ON c.document_id = d.id
+GROUP BY d.source_id, d.source_type
+ORDER BY d.source_id`
+
+	rows, err := database.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query source stats: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	sources := []SourceStat{}
+	for rows.Next() {
+		var source SourceStat
+		if err := rows.Scan(&source.ID, &source.Type, &source.Documents, &source.Chunks); err != nil {
+			return nil, fmt.Errorf("scan source stats: %w", err)
+		}
+		sources = append(sources, source)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read source stats: %w", err)
+	}
+
+	return sources, nil
 }
 
 // DocumentMetadataCoverage aggregates the crawler metadata the index holds.

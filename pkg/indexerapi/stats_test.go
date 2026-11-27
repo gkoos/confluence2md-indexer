@@ -161,7 +161,7 @@ func TestStatsPayloadMatchesTheCLIShape(t *testing.T) {
 
 	wantStats := []string{
 		"chunks", "corpus", "documents", "embeddingModels", "embeddings",
-		"metadata", "runs", "vectorCapability", "vectorName", "vectorReady",
+		"metadata", "runs", "sources", "vectorCapability", "vectorName", "vectorReady",
 	}
 	if got := jsonKeys(t, envelope["stats"]); !reflect.DeepEqual(got, wantStats) {
 		t.Fatalf("stats keys = %v, want %v", got, wantStats)
